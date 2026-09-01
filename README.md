@@ -35,22 +35,14 @@ cp .env.example .env
 Variables:
 
 ```text
-VITE_API_BASE_URL=/api
-VITE_API_PROXY_TARGET=http://localhost:8080
 VITE_APP_ENV=local
+VITE_DEV_API_PROXY_TARGET=
 ```
 
-Para desarrollo local directo contra el backend en `localhost:8080`, definir en
-un archivo `.env` local:
+La aplicacion consume siempre el backend con rutas relativas bajo `/api/...`.
+No configurar ni hardcodear URLs publicas del backend, direcciones locales, tokens ni secretos en el codigo del frontend.
 
-```text
-VITE_API_BASE_URL=http://localhost:8080/api
-```
-
-La alternativa recomendada en desarrollo es dejar `VITE_API_BASE_URL=/api` y
-usar el proxy de Vite con `VITE_API_PROXY_TARGET=http://localhost:8080`.
-
-No subir `.env` ni valores reales de secretos.
+Para conectar el frontend local con un backend local, configurar `VITE_DEV_API_PROXY_TARGET` en un archivo `.env.local` no versionado. Ese valor lo usa solo el proxy de desarrollo de Vite; el codigo de la aplicacion sigue llamando a `/api/...`.
 
 ## Comandos reproducibles
 
@@ -176,7 +168,10 @@ src/
 
 ## Pendientes de contrato
 
-- Confirmar routing desplegado para que `/api/...` llegue al backend desde el frontend.
+- Confirmar JSON exacto de `ProyectoObra`, `OrdenTrabajo`, cuadrillas, maquinaria, materiales y cortes.
+- Confirmar nombres definitivos de enums de estado y prioridad.
+- Confirmar formato de paginacion y filtros, por ejemplo `?estado=...&page=0&size=20`.
+- Confirmar formato comun de errores.
 - Confirmar autenticacion, JWT y roles.
 - Confirmar si el frontend debe publicar evidencias fotograficas contra backend o si backend devuelve URL firmada de almacenamiento.
 - Confirmar convenciones comunes de Core para campos comunes de eventos: id unico, tipo, fecha, modulo emisor, version y correlacion.
