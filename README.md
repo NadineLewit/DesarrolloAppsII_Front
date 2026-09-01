@@ -35,11 +35,14 @@ cp .env.example .env
 Variables:
 
 ```text
-VITE_API_BASE_URL=http://localhost:8080/api
 VITE_APP_ENV=local
+VITE_DEV_API_PROXY_TARGET=
 ```
 
-No subir `.env` ni valores reales de secretos.
+La aplicacion consume siempre el backend con rutas relativas bajo `/api/...`.
+No configurar ni hardcodear URLs publicas del backend, direcciones locales, tokens ni secretos en el codigo del frontend.
+
+Para conectar el frontend local con un backend local, configurar `VITE_DEV_API_PROXY_TARGET` en un archivo `.env.local` no versionado. Ese valor lo usa solo el proxy de desarrollo de Vite; el codigo de la aplicacion sigue llamando a `/api/...`.
 
 ## Comandos reproducibles
 
@@ -163,7 +166,6 @@ src/
 
 ## Pendientes de contrato
 
-- Confirmar URL base de la API del backend.
 - Confirmar JSON exacto de `ProyectoObra`, `OrdenTrabajo`, cuadrillas, maquinaria, materiales y cortes.
 - Confirmar nombres definitivos de enums de estado y prioridad.
 - Confirmar formato de paginacion y filtros, por ejemplo `?estado=...&page=0&size=20`.
