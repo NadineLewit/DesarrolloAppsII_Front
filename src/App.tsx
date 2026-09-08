@@ -18,31 +18,381 @@ import {
   Truck,
   Users,
 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import type { FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { ApiError, obrasApi } from './api/obrasApi'
 import { env } from './config/env'
 import { eventosIntegracion, modulosIntegracion } from './contracts/integrations'
-import { cortes, estadoLabels, obras, ordenes, permisosPorRol, recursos } from './data/mockData'
-import type { EstadoOrden, Prioridad, Rol, Seccion } from './types'
+import { originLabels, permisosPorRol, projectStatusLabels, workOrderStatusLabels } from './constants/ui'
+import type {
+  CorteCalle,
+  DashboardSummary,
+  OrdenTrabajo,
+  PageResponse,
+  Prioridad,
+  ProyectoObra,
+  ProyectoObraPayload,
+  ResourcesSummary,
+  Rol,
+  Seccion,
+  WorkOrderOrigin,
+  WorkOrderPriority,
+  WorkOrderStatus,
+} from './types'
 import { formatMoney } from './utils/formatters'
-import { filtrarOrdenes, paginar } from './utils/orders'
 import './App.css'
+
+const ORDER_PAGE_SIZE = 5
+const LIST_PAGE_SIZE = 20
+
+type RemoteState<T> = {
+  status: 'loading' | 'success' | 'error'
+  data?: T
+  message?: string
+}
+
+type Feedback = {
+  type: 'success' | 'error'
+  message: string
+}
+
+type ProjectFormState = {
+  name: string
+  description: string
+  scope: string
+  location: string
+  estimatedBudget: string
+  approvedBudget: string
+  usedBudget: string
+  estimatedStartDate: string
+  estimatedDurationDays: string
+  approvedDeadlineDays: string
+  physicalProgress: string
+  technicalManager: string
+  contractor: string
+}
+
+type OrderFormState = {
+  sourceRequestId: string
+  origin: WorkOrderOrigin
+  description: string
+  interventionType: string
+  location: string
+  priority: WorkOrderPriority
+  estimatedDurationHours: string
+  crew: string
+}
+
+type ClosureFormState = {
+  workOrderId: string
+  location: string
+  affectedSections: string
+  requestedFrom: string
+  requestedTo: string
+  reason: string
+}
 
 function App() {
   const [seccionActiva, setSeccionActiva] = useState<Seccion>('dashboard')
   const [rol, setRol] = useState<Rol>('PERSONAL_OBRAS')
   const [busqueda, setBusqueda] = useState('')
-  const [estadoOrden, setEstadoOrden] = useState<'TODOS' | EstadoOrden>('TODOS')
+  const [estadoOrden, setEstadoOrden] = useState<'TODOS' | WorkOrderStatus>('TODOS')
   const [pagina, setPagina] = useState(1)
+  const [dashboard, setDashboard] = useState<RemoteState<DashboardSummary>>({ status: 'loading' })
+  const [projects, setProjects] = useState<RemoteState<PageResponse<ProyectoObra>>>({ status: 'loading' })
+  const [orders, setOrders] = useState<RemoteState<PageResponse<OrdenTrabajo>>>({ status: 'loading' })
+  const [resources, setResources] = useState<RemoteState<ResourcesSummary>>({ status: 'loading' })
+  const [closures, setClosures] = useState<RemoteState<PageResponse<CorteCalle>>>({ status: 'loading' })
+  const [projectDetail, setProjectDetail] = useState<RemoteState<ProyectoObra> | null>(null)
+  const [orderDetail, setOrderDetail] = useState<RemoteState<OrdenTrabajo> | null>(null)
+  const [feedback, setFeedback] = useState<Feedback | null>(null)
+  const [actionPending, setActionPending] = useState<string | null>(null)
+  const [projectFormMode, setProjectFormMode] = useState<'closed' | 'create' | 'edit'>('closed')
+  const [editingProjectId, setEditingProjectId] = useState<number | null>(null)
+  const [projectForm, setProjectForm] = useState<ProjectFormState>(emptyProjectForm)
+  const [orderFormMode, setOrderFormMode] = useState<'closed' | 'create' | 'edit'>('closed')
+  const [editingOrderId, setEditingOrderId] = useState<number | null>(null)
+  const [orderForm, setOrderForm] = useState<OrderFormState>(emptyOrderForm)
+  const [closureFormOpen, setClosureFormOpen] = useState(false)
+  const [closureForm, setClosureForm] = useState<ClosureFormState>(emptyClosureForm)
 
-  const ordenesFiltradas = useMemo(() => filtrarOrdenes(ordenes, busqueda, estadoOrden), [busqueda, estadoOrden])
-
-  const ordenesPaginadas = paginar(ordenesFiltradas, pagina, 3)
-  const totalPaginas = Math.max(1, Math.ceil(ordenesFiltradas.length / 3))
   const permisos = permisosPorRol[rol]
-  const obrasActivas = obras.filter((obra) => obra.estado === 'EN_EJECUCION' || obra.estado === 'APROBADA').length
-  const alertasExternas = ordenes.filter((orden) => orden.origen !== 'Manual').length
-  const ordenesDemoradas = ordenes.filter((orden) => orden.prioridad === 'CRITICA' || orden.estado === 'PAUSADA').length
-  const avancePromedio = Math.round(obras.reduce((acc, obra) => acc + obra.avanceFisico, 0) / obras.length)
+
+  const crews = useMemo(() => resources.data?.crews ?? [], [resources.data?.crews])
+  const crewNames = useMemo(() => {
+    const names = new Set(crews.map((crew) => crew.nombre))
+    if (orderForm.crew) {
+      names.add(orderForm.crew)
+    }
+    return Array.from(names).sort()
+  }, [crews, orderForm.crew])
+
+  const resourceCards = useMemo(() => {
+    const data = resources.data
+    if (!data) {
+      return []
+    }
+
+    return [
+      ...data.crews.map((crew) => ({
+        id: `crew-${crew.id}`,
+        name: crew.nombre,
+        type: 'Cuadrilla',
+        detail: 'Asignable a ordenes',
+      })),
+      ...data.materials.map((material) => ({
+        id: `material-${material.id}`,
+        name: material.nombre,
+        type: material.unidad ? `Material - ${material.unidad}` : 'Material',
+        detail: 'Catalogo backend',
+      })),
+      ...data.machinery.map((machine) => ({
+        id: `machine-${machine.id}`,
+        name: machine.nombre,
+        type: 'Maquinaria',
+        detail: 'Catalogo backend',
+      })),
+    ]
+  }, [resources.data])
+
+  const totalPaginas = Math.max(1, orders.data?.totalPages ?? 1)
+  const busy = actionPending !== null
+
+  const loadDashboard = useCallback(async () => {
+    setDashboard({ status: 'loading' })
+    try {
+      setDashboard({ status: 'success', data: await obrasApi.getDashboardSummary() })
+    } catch (error) {
+      setDashboard({ status: 'error', message: getErrorMessage(error) })
+    }
+  }, [])
+
+  const loadProjects = useCallback(async () => {
+    setProjects({ status: 'loading' })
+    try {
+      setProjects({
+        status: 'success',
+        data: await obrasApi.listProjects({ page: 0, size: LIST_PAGE_SIZE, sort: 'id,asc' }),
+      })
+    } catch (error) {
+      setProjects({ status: 'error', message: getErrorMessage(error) })
+    }
+  }, [])
+
+  const loadOrders = useCallback(async () => {
+    setOrders({ status: 'loading' })
+    try {
+      setOrders({
+        status: 'success',
+        data: await obrasApi.listWorkOrders({
+          search: busqueda,
+          status: estadoOrden === 'TODOS' ? undefined : estadoOrden,
+          page: pagina - 1,
+          size: ORDER_PAGE_SIZE,
+          sort: 'id,asc',
+        }),
+      })
+    } catch (error) {
+      setOrders({ status: 'error', message: getErrorMessage(error) })
+    }
+  }, [busqueda, estadoOrden, pagina])
+
+  const loadResources = useCallback(async () => {
+    setResources({ status: 'loading' })
+    try {
+      setResources({ status: 'success', data: await obrasApi.getResources() })
+    } catch (error) {
+      setResources({ status: 'error', message: getErrorMessage(error) })
+    }
+  }, [])
+
+  const loadClosures = useCallback(async () => {
+    setClosures({ status: 'loading' })
+    try {
+      setClosures({
+        status: 'success',
+        data: await obrasApi.listStreetClosures({ page: 0, size: LIST_PAGE_SIZE, sort: 'id,asc' }),
+      })
+    } catch (error) {
+      setClosures({ status: 'error', message: getErrorMessage(error) })
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadDashboard()
+  }, [loadDashboard])
+
+  useEffect(() => {
+    void loadProjects()
+  }, [loadProjects])
+
+  useEffect(() => {
+    void loadResources()
+  }, [loadResources])
+
+  useEffect(() => {
+    void loadClosures()
+  }, [loadClosures])
+
+  useEffect(() => {
+    void loadOrders()
+  }, [loadOrders])
+
+  async function refreshCoreData() {
+    await Promise.all([loadDashboard(), loadProjects(), loadOrders()])
+  }
+
+  async function runAction(key: string, successMessage: string, action: () => Promise<unknown>) {
+    setActionPending(key)
+    setFeedback(null)
+    try {
+      await action()
+      await refreshCoreData()
+      setFeedback({ type: 'success', message: successMessage })
+    } catch (error) {
+      setFeedback({ type: 'error', message: getErrorMessage(error) })
+    } finally {
+      setActionPending(null)
+    }
+  }
+
+  function openCreateProjectForm() {
+    setEditingProjectId(null)
+    setProjectForm(emptyProjectForm())
+    setProjectFormMode('create')
+  }
+
+  function openEditProjectForm(project: ProyectoObra) {
+    setEditingProjectId(project.id)
+    setProjectForm(projectToForm(project))
+    setProjectFormMode('edit')
+  }
+
+  async function handleProjectSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    const payload = buildProjectPayload(projectForm)
+    await runAction(
+      'project-form',
+      projectFormMode === 'edit' ? 'Proyecto actualizado.' : 'Proyecto creado.',
+      () => editingProjectId ? obrasApi.updateProject(editingProjectId, payload) : obrasApi.createProject(payload),
+    )
+    setProjectFormMode('closed')
+    setEditingProjectId(null)
+    setProjectForm(emptyProjectForm())
+  }
+
+  function openCreateOrderForm() {
+    setEditingOrderId(null)
+    setOrderForm(emptyOrderForm())
+    setOrderFormMode('create')
+  }
+
+  function openEditOrderForm(order: OrdenTrabajo) {
+    setEditingOrderId(order.id)
+    setOrderForm(orderToForm(order))
+    setOrderFormMode('edit')
+  }
+
+  async function handleOrderSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    const payload = buildOrderPayload(orderForm)
+    await runAction(
+      'order-form',
+      orderFormMode === 'edit' ? 'Orden actualizada.' : 'Orden creada.',
+      () => editingOrderId ? obrasApi.updateWorkOrder(editingOrderId, payload) : obrasApi.createWorkOrder(payload),
+    )
+    setOrderFormMode('closed')
+    setEditingOrderId(null)
+    setOrderForm(emptyOrderForm())
+  }
+
+  async function handleClosureSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    await runAction(
+      'closure-form',
+      'Solicitud de corte creada.',
+      () => obrasApi.createStreetClosure(buildClosurePayload(closureForm)),
+    )
+    await loadClosures()
+    setClosureFormOpen(false)
+    setClosureForm(emptyClosureForm())
+  }
+
+  async function loadProjectDetail(id: number) {
+    setProjectDetail({ status: 'loading' })
+    try {
+      setProjectDetail({ status: 'success', data: await obrasApi.getProject(id) })
+    } catch (error) {
+      setProjectDetail({ status: 'error', message: getErrorMessage(error) })
+    }
+  }
+
+  async function loadOrderDetail(id: number) {
+    setOrderDetail({ status: 'loading' })
+    try {
+      setOrderDetail({ status: 'success', data: await obrasApi.getWorkOrder(id) })
+    } catch (error) {
+      setOrderDetail({ status: 'error', message: getErrorMessage(error) })
+    }
+  }
+
+  async function handleScheduleOrder(order: OrdenTrabajo) {
+    const scheduledDate = window.prompt('Fecha programada (YYYY-MM-DD)', order.scheduledDate ?? '')
+    if (!scheduledDate) {
+      return
+    }
+
+    const crew = window.prompt('Cuadrilla existente. Dejar vacio conserva o deja sin asignar.', order.crew ?? '')
+    if (crew === null) {
+      return
+    }
+
+    await runAction(`schedule-${order.id}`, 'Orden programada.', () =>
+      obrasApi.scheduleWorkOrder(order.id, {
+        scheduledDate,
+        ...(crew.trim() ? { crew: crew.trim() } : {}),
+      }),
+    )
+  }
+
+  async function handleCompleteOrder(order: OrdenTrabajo) {
+    const outcome = window.prompt('Resultado de la orden', order.outcome ?? '')
+    if (outcome === null) {
+      return
+    }
+
+    await runAction(`complete-${order.id}`, 'Orden completada.', () =>
+      obrasApi.completeWorkOrder(order.id, optionalText(outcome) ? { outcome: outcome.trim() } : {}),
+    )
+  }
+
+  async function handleValidateOrder(order: OrdenTrabajo) {
+    const decision = window.prompt('Escribi APROBAR para validar o REABRIR para devolver la orden', 'APROBAR')
+    if (decision === null) {
+      return
+    }
+
+    const normalizedDecision = decision.trim().toUpperCase()
+    if (normalizedDecision !== 'APROBAR' && normalizedDecision !== 'REABRIR') {
+      setFeedback({ type: 'error', message: 'La decision debe ser APROBAR o REABRIR.' })
+      return
+    }
+
+    const observations = window.prompt('Observaciones', '')
+    if (observations === null) {
+      return
+    }
+
+    await runAction(`validate-${order.id}`, 'Orden validada.', () =>
+      obrasApi.validateWorkOrder(order.id, {
+        approved: normalizedDecision === 'APROBAR',
+        ...(optionalText(observations) ? { observations: observations.trim() } : {}),
+      }),
+    )
+  }
 
   return (
     <div className="app-shell">
@@ -102,17 +452,27 @@ function App() {
           </div>
         </header>
 
+        {feedback && <div className={`notice ${feedback.type}`}>{feedback.message}</div>}
+
         {seccionActiva === 'dashboard' && (
           <section className="dashboard-grid">
-            <MetricCard icon={Building2} label="Obras activas" value={obrasActivas.toString()} trend="+2 esta semana" />
-            <MetricCard icon={ClipboardList} label="Ordenes abiertas" value="4" trend="con sourceRequestId" />
-            <MetricCard icon={Network} label="Alertas externas" value={alertasExternas.toString()} trend="M2, M6 y M7" />
-            <MetricCard icon={AlertTriangle} label="Demoras detectadas" value={ordenesDemoradas.toString()} trend="requieren revision" />
+            {dashboard.status === 'loading' && <StateMessage type="loading" message="Cargando dashboard desde backend..." />}
+            {dashboard.status === 'error' && (
+              <StateMessage type="error" message={dashboard.message ?? 'No se pudo cargar el dashboard.'} onRetry={loadDashboard} />
+            )}
+            {dashboard.status === 'success' && dashboard.data && (
+              <>
+                <MetricCard icon={Building2} label="Obras activas" value={dashboard.data.activeProjects.toString()} trend="desde backend" />
+                <MetricCard icon={ClipboardList} label="Ordenes abiertas" value={dashboard.data.openWorkOrders.toString()} trend="no completadas" />
+                <MetricCard icon={Network} label="Ordenes externas" value={dashboard.data.externalWorkOrders.toString()} trend="origen no manual" />
+                <MetricCard icon={AlertTriangle} label="Demoras detectadas" value={dashboard.data.delayedWorkOrders.toString()} trend="segun fecha programada" />
+              </>
+            )}
 
             <section className="panel full">
               <div className="panel-heading">
                 <h2>Mapa de integraciones</h2>
-                <span className="loading-pill">Core define convenciones</span>
+                <span className="loading-pill">Fuera de esta entrega</span>
               </div>
               <div className="module-grid">
                 {modulosIntegracion.map((modulo) => (
@@ -127,7 +487,7 @@ function App() {
             <section className="panel full">
               <div className="panel-heading">
                 <h2>Ciclo de vida de obra publica</h2>
-                <span className="loading-pill">Estados del alcance</span>
+                <span className="loading-pill">Contrato backend</span>
               </div>
               <div className="lifecycle">
                 {flujoObra.map((paso) => (
@@ -139,27 +499,16 @@ function App() {
               </div>
             </section>
 
-            <MetricCard icon={Gauge} label="Avance promedio" value={`${avancePromedio}%`} trend="fisico" />
+            {dashboard.status === 'success' && dashboard.data && (
+              <MetricCard icon={Gauge} label="Avance promedio" value={`${dashboard.data.averagePhysicalProgress}%`} trend="fisico global" />
+            )}
 
             <section className="panel wide">
               <div className="panel-heading">
                 <h2>Cumplimiento por obra</h2>
-                <span className="loading-pill">Datos mock</span>
+                <span className="loading-pill">GET projects</span>
               </div>
-              <div className="progress-list">
-                {obras.map((obra) => (
-                  <article key={obra.id} className="progress-row">
-                    <div>
-                      <strong>{obra.nombre}</strong>
-                      <span>{obra.ubicacion} - {obra.responsableTecnico}</span>
-                    </div>
-                    <div className="bar" aria-label={`Avance ${obra.avanceFisico}%`}>
-                      <span style={{ width: `${obra.avanceFisico}%` }} />
-                    </div>
-                    <b>{obra.avanceFisico}%</b>
-                  </article>
-                ))}
-              </div>
+              <ProjectProgressList projects={projects} onRetry={loadProjects} />
             </section>
 
             <section className="panel">
@@ -183,29 +532,91 @@ function App() {
           <section className="panel">
             <div className="panel-heading">
               <h2>Proyectos de obra</h2>
-              <button type="button" disabled={!permisos.includes('crearProyecto')}>
+              <button type="button" disabled={!permisos.includes('crearProyecto') || busy} onClick={openCreateProjectForm}>
                 <Plus size={16} aria-hidden="true" />
                 Crear
               </button>
             </div>
-            <div className="table">
-              {obras.map((obra) => (
-                <article key={obra.id} className="table-row project-row">
-                  <div>
-                    <strong>{obra.nombre}</strong>
-                    <span>{obra.ubicacion} - {obra.alcance}</span>
-                    <span>Estimado {formatMoney(obra.presupuesto)} - {obra.duracionEstimadaDias} dias</span>
-                  </div>
-                  <StatusBadge value={estadoLabels[obra.estado]} />
-                  <span>{obra.avanceFisico}% fisico</span>
-                  <span>{obra.avancePresupuestario}% presupuesto</span>
-                  <button type="button" disabled={!permisos.includes('aprobarProyecto')}>
-                    <CheckCircle2 size={16} aria-hidden="true" />
-                    Aprobar
-                  </button>
-                </article>
-              ))}
-            </div>
+
+            {projectFormMode !== 'closed' && (
+              <ProjectForm
+                disabled={busy}
+                mode={projectFormMode}
+                onCancel={() => {
+                  setProjectFormMode('closed')
+                  setEditingProjectId(null)
+                }}
+                onChange={(field, value) => setProjectForm((current) => ({ ...current, [field]: value }))}
+                onSubmit={handleProjectSubmit}
+                value={projectForm}
+              />
+            )}
+
+            {projects.status === 'loading' && <StateMessage type="loading" message="Cargando proyectos desde backend..." />}
+            {projects.status === 'error' && (
+              <StateMessage type="error" message={projects.message ?? 'No se pudieron cargar los proyectos.'} onRetry={loadProjects} />
+            )}
+            {projects.status === 'success' && projects.data && projects.data.content.length === 0 && (
+              <StateMessage type="empty" message="No hay proyectos cargados en el backend." />
+            )}
+            {projects.status === 'success' && projects.data && projects.data.content.length > 0 && (
+              <div className="table">
+                {projects.data.content.map((project) => (
+                  <article key={project.id} className="table-row project-row">
+                    <div>
+                      <strong>{project.name}</strong>
+                      <span>{textOrEmpty(project.location)} - {textOrEmpty(project.scope)}</span>
+                      <span>Estimado {formatMoney(project.estimatedBudget)} - {project.estimatedDurationDays} dias</span>
+                    </div>
+                    <StatusBadge value={projectStatusLabels[project.status] ?? project.status} />
+                    <span>{project.physicalProgress}% fisico</span>
+                    <span>{project.budgetProgress}% presupuesto</span>
+                    <div className="row-actions">
+                      <button type="button" disabled={busy} onClick={() => void loadProjectDetail(project.id)}>
+                        Detalle
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!permisos.includes('modificarProyecto') || busy}
+                        onClick={() => openEditProjectForm(project)}
+                      >
+                        Editar
+                      </button>
+                      <button
+                        type="button"
+                        disabled={project.status !== 'BORRADOR' || !permisos.includes('modificarProyecto') || busy}
+                        onClick={() => void runAction(`submit-project-${project.id}`, 'Proyecto enviado a aprobacion.', () =>
+                          obrasApi.submitProjectForApproval(project.id),
+                        )}
+                      >
+                        Enviar
+                      </button>
+                      <button
+                        type="button"
+                        disabled={project.status !== 'PENDIENTE_APROBACION' || !permisos.includes('aprobarProyecto') || busy}
+                        onClick={() => void runAction(`approve-project-${project.id}`, 'Proyecto aprobado.', () =>
+                          obrasApi.approveProject(project.id),
+                        )}
+                      >
+                        <CheckCircle2 size={16} aria-hidden="true" />
+                        Aprobar
+                      </button>
+                      <button
+                        type="button"
+                        disabled={project.status !== 'PENDIENTE_APROBACION' || !permisos.includes('rechazarProyecto') || busy}
+                        onClick={() => void runAction(`reject-project-${project.id}`, 'Proyecto rechazado.', () =>
+                          obrasApi.rejectProject(project.id),
+                        )}
+                      >
+                        Rechazar
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+
+            {projectDetail && <ProjectDetail state={projectDetail} />}
           </section>
         )}
 
@@ -214,13 +625,28 @@ function App() {
             <div className="panel-heading stacked">
               <div>
                 <h2>Ordenes de trabajo</h2>
-                <p>Busqueda, filtros, sourceRequestId, paginacion y acciones segun rol.</p>
+                <p>Busqueda, filtros, paginacion y acciones contra endpoints reales.</p>
               </div>
-              <button type="button" disabled={!permisos.includes('crearOrden')}>
+              <button type="button" disabled={!permisos.includes('crearOrden') || busy} onClick={openCreateOrderForm}>
                 <Plus size={16} aria-hidden="true" />
                 Nueva orden
               </button>
             </div>
+
+            {orderFormMode !== 'closed' && (
+              <OrderForm
+                crewNames={crewNames}
+                disabled={busy}
+                mode={orderFormMode}
+                onCancel={() => {
+                  setOrderFormMode('closed')
+                  setEditingOrderId(null)
+                }}
+                onChange={(field, value) => setOrderForm((current) => ({ ...current, [field]: value }))}
+                onSubmit={handleOrderSubmit}
+                value={orderForm}
+              />
+            )}
 
             <div className="filters">
               <label className="search-box">
@@ -237,75 +663,135 @@ function App() {
               <select
                 value={estadoOrden}
                 onChange={(event) => {
-                  setEstadoOrden(event.target.value as 'TODOS' | EstadoOrden)
+                  setEstadoOrden(event.target.value as 'TODOS' | WorkOrderStatus)
                   setPagina(1)
                 }}
               >
                 <option value="TODOS">Todos los estados</option>
-                <option value="PROGRAMADA">Programada</option>
-                <option value="ASIGNADA">Asignada</option>
-                <option value="INICIADA">Iniciada</option>
-                <option value="PAUSADA">Pausada</option>
-                <option value="FINALIZADA">Finalizada</option>
-                <option value="VALIDADA">Validada</option>
+                {workOrderStatusOptions.map((status) => (
+                  <option key={status} value={status}>{workOrderStatusLabels[status]}</option>
+                ))}
               </select>
             </div>
 
-            <div className="table">
-              {ordenesPaginadas.map((orden) => (
-                <article key={orden.id} className="table-row order-row">
-                  <div>
-                    <strong>OT #{orden.id} - {orden.descripcion}</strong>
-                    <span>{orden.ubicacion} - {orden.tipo} - {orden.fechaProgramada}</span>
-                    <span>{orden.origen} - {orden.sourceRequestId} - {orden.duracionEstimadaHoras} h estimadas</span>
-                  </div>
-                  <PriorityBadge value={orden.prioridad} />
-                  <StatusBadge value={estadoLabels[orden.estado]} />
-                  <span>{orden.cuadrilla}</span>
-                  <span>{orden.outcome ?? (orden.evidencia ? 'Con evidencia' : 'Sin evidencia')}</span>
-                  <div className="row-actions">
-                    <button type="button" aria-label="Iniciar orden" disabled={!permisos.includes('iniciarOrden')}>
-                      <PlayCircle size={16} aria-hidden="true" />
-                    </button>
-                    <button type="button" aria-label="Pausar orden" disabled={!permisos.includes('pausarOrden')}>
-                      <PauseCircle size={16} aria-hidden="true" />
-                    </button>
-                    <button type="button" aria-label="Validar orden" disabled={!permisos.includes('validarOrden')}>
-                      <CheckCircle2 size={16} aria-hidden="true" />
-                    </button>
-                  </div>
-                </article>
-              ))}
-            </div>
+            {orders.status === 'loading' && <StateMessage type="loading" message="Cargando ordenes desde backend..." />}
+            {orders.status === 'error' && (
+              <StateMessage type="error" message={orders.message ?? 'No se pudieron cargar las ordenes.'} onRetry={loadOrders} />
+            )}
+            {orders.status === 'success' && orders.data && orders.data.content.length === 0 && (
+              <StateMessage type="empty" message="No hay ordenes para los filtros seleccionados." />
+            )}
+            {orders.status === 'success' && orders.data && orders.data.content.length > 0 && (
+              <div className="table">
+                {orders.data.content.map((order) => (
+                  <article key={order.id} className="table-row order-row">
+                    <div>
+                      <strong>OT #{order.id} - {order.description}</strong>
+                      <span>{textOrEmpty(order.location)} - {textOrEmpty(order.interventionType)} - {order.scheduledDate ?? 'Sin fecha'}</span>
+                      <span>{originLabels[order.origin]} - {order.sourceRequestId ?? 'Sin origen externo'} - {order.estimatedDurationHours ?? 0} h estimadas</span>
+                    </div>
+                    <PriorityBadge value={order.priority} />
+                    <StatusBadge value={workOrderStatusLabels[order.status]} />
+                    <span>{order.crew ?? 'Sin cuadrilla'}</span>
+                    <span>{order.outcome ?? (order.hasEvidence ? 'Con evidencia' : 'Sin evidencia')}</span>
+                    <div className="row-actions">
+                      <button type="button" disabled={busy} onClick={() => void loadOrderDetail(order.id)}>
+                        Detalle
+                      </button>
+                      <button type="button" disabled={!permisos.includes('crearOrden') || busy} onClick={() => openEditOrderForm(order)}>
+                        Editar
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Programar orden"
+                        title="Programar"
+                        disabled={!permisos.includes('programarOrden') || !canScheduleOrder(order.status) || busy}
+                        onClick={() => void handleScheduleOrder(order)}
+                      >
+                        <Clock3 size={16} aria-hidden="true" />
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Iniciar orden"
+                        title="Iniciar"
+                        disabled={!permisos.includes('iniciarOrden') || !canStartOrder(order.status) || busy}
+                        onClick={() => void runAction(`start-order-${order.id}`, 'Orden iniciada.', () =>
+                          obrasApi.startWorkOrder(order.id),
+                        )}
+                      >
+                        <PlayCircle size={16} aria-hidden="true" />
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Pausar orden"
+                        title="Pausar"
+                        disabled={!permisos.includes('pausarOrden') || order.status !== 'EN_EJECUCION' || busy}
+                        onClick={() => void runAction(`pause-order-${order.id}`, 'Orden pausada.', () =>
+                          obrasApi.pauseWorkOrder(order.id),
+                        )}
+                      >
+                        <PauseCircle size={16} aria-hidden="true" />
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Completar orden"
+                        title="Completar"
+                        disabled={!permisos.includes('finalizarOrden') || !canCompleteOrder(order.status) || busy}
+                        onClick={() => void handleCompleteOrder(order)}
+                      >
+                        <CheckCircle2 size={16} aria-hidden="true" />
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Validar orden"
+                        title="Validar"
+                        disabled={!permisos.includes('validarOrden') || order.status !== 'COMPLETADA' || busy}
+                        onClick={() => void handleValidateOrder(order)}
+                      >
+                        <ShieldCheck size={16} aria-hidden="true" />
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
 
             <footer className="pagination">
-              <button type="button" onClick={() => setPagina((actual) => Math.max(1, actual - 1))} disabled={pagina === 1}>
+              <button type="button" onClick={() => setPagina((actual) => Math.max(1, actual - 1))} disabled={pagina === 1 || busy}>
                 Anterior
               </button>
               <span>Pagina {pagina} de {totalPaginas}</span>
               <button
                 type="button"
                 onClick={() => setPagina((actual) => Math.min(totalPaginas, actual + 1))}
-                disabled={pagina === totalPaginas}
+                disabled={pagina === totalPaginas || busy}
               >
                 Siguiente
               </button>
             </footer>
+
+            {orderDetail && <OrderDetail state={orderDetail} />}
           </section>
         )}
 
         {seccionActiva === 'recursos' && (
           <section className="resource-grid">
-            {recursos.map((recurso) => (
-              <article key={recurso.nombre} className="panel resource-card">
+            {resources.status === 'loading' && <StateMessage type="loading" message="Cargando recursos desde backend..." />}
+            {resources.status === 'error' && (
+              <StateMessage type="error" message={resources.message ?? 'No se pudieron cargar los recursos.'} onRetry={loadResources} />
+            )}
+            {resources.status === 'success' && resourceCards.length === 0 && (
+              <StateMessage type="empty" message="No hay recursos cargados en el backend." />
+            )}
+            {resources.status === 'success' && resourceCards.map((resource) => (
+              <article key={resource.id} className="panel resource-card">
                 <div className="resource-icon">
-                  {recurso.tipo === 'Cuadrilla' ? <Users aria-hidden="true" /> : <Hammer aria-hidden="true" />}
+                  {resource.type.startsWith('Cuadrilla') ? <Users aria-hidden="true" /> : <Hammer aria-hidden="true" />}
                 </div>
-                <strong>{recurso.nombre}</strong>
-                <span>{recurso.tipo}</span>
-                <StatusBadge value={recurso.disponibilidad} />
-                <div className="bar"><span style={{ width: `${recurso.carga}%` }} /></div>
-                <small>Carga asignada {recurso.carga}%</small>
+                <strong>{resource.name}</strong>
+                <span>{resource.type}</span>
+                <StatusBadge value={resource.detail} />
+                <small className="blocked-note">Disponibilidad y carga quedan bloqueadas por backend.</small>
               </article>
             ))}
           </section>
@@ -315,25 +801,50 @@ function App() {
           <section className="panel">
             <div className="panel-heading">
               <h2>Solicitudes de corte de calle</h2>
-              <button type="button" disabled={!permisos.includes('solicitarCorte')}>
+              <button
+                type="button"
+                disabled={!permisos.includes('solicitarCorte') || busy}
+                onClick={() => setClosureFormOpen(true)}
+              >
                 <Plus size={16} aria-hidden="true" />
                 Solicitar
               </button>
             </div>
-            <div className="timeline">
-              {cortes.map((corte) => (
-                <article key={corte.id} className="timeline-item">
-                  <Clock3 size={18} aria-hidden="true" />
-                  <div>
-                    <strong>{corte.closureRequestId} - OT #{corte.workOrderId}</strong>
-                    <span>{corte.ubicacion}</span>
-                    <span>{corte.tramosAfectados.join(', ')}</span>
-                  </div>
-                  <span>{corte.desde} al {corte.hasta}</span>
-                  <StatusBadge value={corte.estado} />
-                </article>
-              ))}
-            </div>
+
+            {closureFormOpen && (
+              <ClosureForm
+                disabled={busy}
+                onCancel={() => setClosureFormOpen(false)}
+                onChange={(field, value) => setClosureForm((current) => ({ ...current, [field]: value }))}
+                onSubmit={handleClosureSubmit}
+                value={closureForm}
+              />
+            )}
+
+            {closures.status === 'loading' && <StateMessage type="loading" message="Cargando cortes desde backend..." />}
+            {closures.status === 'error' && (
+              <StateMessage type="error" message={closures.message ?? 'No se pudieron cargar los cortes.'} onRetry={loadClosures} />
+            )}
+            {closures.status === 'success' && closures.data && closures.data.content.length === 0 && (
+              <StateMessage type="empty" message="No hay solicitudes de corte cargadas en el backend." />
+            )}
+            {closures.status === 'success' && closures.data && closures.data.content.length > 0 && (
+              <div className="timeline">
+                {closures.data.content.map((closure) => (
+                  <article key={closure.id} className="timeline-item">
+                    <Clock3 size={18} aria-hidden="true" />
+                    <div>
+                      <strong>{closure.closureRequestId} - OT #{closure.workOrderId}</strong>
+                      <span>{closure.location}</span>
+                      <span>{closure.affectedSections.join(', ')}</span>
+                    </div>
+                    <span>{closure.requestedFrom} al {closure.requestedTo}</span>
+                    <StatusBadge value={formatBackendLabel(closure.status)} />
+                  </article>
+                ))}
+              </div>
+            )}
+            <p className="blocked-note">Autorizacion o rechazo de Transito queda bloqueado por backend/integracion externa.</p>
           </section>
         )}
 
@@ -342,9 +853,9 @@ function App() {
             <div className="panel-heading stacked">
               <div>
                 <h2>Eventos e integraciones</h2>
-                <p>Nombres y payloads tomados del backlog, guia y capturas compartidas.</p>
+                <p>La integracion completa entre modulos queda fuera de esta primera entrega.</p>
               </div>
-              <span className="loading-pill">Sin publicar hasta confirmar backend</span>
+              <span className="loading-pill">Bloqueado por backend externo</span>
             </div>
             <div className="integration-table">
               {eventosIntegracion.map((evento) => (
@@ -377,12 +888,23 @@ const titulos: Record<Seccion, string> = {
 }
 
 const flujoObra = [
-  { estado: 'Borrador', evento: 'publicWorksProjectCreated' },
-  { estado: 'Pendiente de aprobacion', evento: 'publicWorksProjectSubmittedForApproval' },
-  { estado: 'Aprobada o Rechazada', evento: 'publicWorksProjectApproved / publicWorksProjectRejected' },
-  { estado: 'En ejecucion', evento: 'publicWorksProjectStarted' },
-  { estado: 'Suspendida o Reanudada', evento: 'publicWorksProjectSuspended / publicWorksProjectResumed' },
-  { estado: 'Finalizada', evento: 'publicWorksProjectCompleted' },
+  { estado: 'Borrador', evento: 'BORRADOR' },
+  { estado: 'Pendiente de aprobacion', evento: 'PENDIENTE_APROBACION' },
+  { estado: 'Aprobado', evento: 'SIN_INICIAR' },
+  { estado: 'En ejecucion', evento: 'EN_EJECUCION' },
+  { estado: 'Pausada', evento: 'PAUSADA' },
+  { estado: 'Finalizada', evento: 'FINALIZADA' },
+]
+
+const workOrderStatusOptions: WorkOrderStatus[] = [
+  'PENDIENTE',
+  'PROGRAMADA',
+  'ASIGNADA',
+  'EN_EJECUCION',
+  'PAUSADA',
+  'COMPLETADA',
+  'VALIDADA',
+  'REABIERTA',
 ]
 
 function MetricCard({ icon: Icon, label, value, trend }: { icon: typeof BarChart3; label: string; value: string; trend: string }) {
@@ -396,12 +918,485 @@ function MetricCard({ icon: Icon, label, value, trend }: { icon: typeof BarChart
   )
 }
 
+function ProjectProgressList({ projects, onRetry }: { projects: RemoteState<PageResponse<ProyectoObra>>; onRetry: () => void }) {
+  if (projects.status === 'loading') {
+    return <StateMessage type="loading" message="Cargando avances..." />
+  }
+
+  if (projects.status === 'error') {
+    return <StateMessage type="error" message={projects.message ?? 'No se pudieron cargar los avances.'} onRetry={onRetry} />
+  }
+
+  if (!projects.data || projects.data.content.length === 0) {
+    return <StateMessage type="empty" message="Sin proyectos para mostrar." />
+  }
+
+  return (
+    <div className="progress-list">
+      {projects.data.content.map((project) => (
+        <article key={project.id} className="progress-row">
+          <div>
+            <strong>{project.name}</strong>
+            <span>{textOrEmpty(project.location)} - {textOrEmpty(project.technicalManager)}</span>
+          </div>
+          <div className="bar" aria-label={`Avance ${project.physicalProgress}%`}>
+            <span style={{ width: `${project.physicalProgress}%` }} />
+          </div>
+          <b>{project.physicalProgress}%</b>
+        </article>
+      ))}
+    </div>
+  )
+}
+
+function StateMessage({ type, message, onRetry }: { type: 'loading' | 'error' | 'empty'; message: string; onRetry?: () => void }) {
+  return (
+    <div className={`state-message ${type}`}>
+      <span>{message}</span>
+      {onRetry && <button type="button" onClick={onRetry}>Reintentar</button>}
+    </div>
+  )
+}
+
+function ProjectDetail({ state }: { state: RemoteState<ProyectoObra> }) {
+  if (state.status === 'loading') {
+    return <StateMessage type="loading" message="Cargando detalle del proyecto..." />
+  }
+
+  if (state.status === 'error') {
+    return <StateMessage type="error" message={state.message ?? 'No se pudo cargar el detalle.'} />
+  }
+
+  if (!state.data) {
+    return null
+  }
+
+  return (
+    <section className="detail-panel">
+      <h2>Detalle de proyecto #{state.data.id}</h2>
+      <dl>
+        <dt>Nombre</dt>
+        <dd>{state.data.name}</dd>
+        <dt>Descripcion</dt>
+        <dd>{textOrEmpty(state.data.description)}</dd>
+        <dt>Responsable</dt>
+        <dd>{textOrEmpty(state.data.technicalManager)}</dd>
+        <dt>Contratista</dt>
+        <dd>{textOrEmpty(state.data.contractor)}</dd>
+        <dt>Estado</dt>
+        <dd>{projectStatusLabels[state.data.status] ?? state.data.status}</dd>
+      </dl>
+    </section>
+  )
+}
+
+function OrderDetail({ state }: { state: RemoteState<OrdenTrabajo> }) {
+  if (state.status === 'loading') {
+    return <StateMessage type="loading" message="Cargando detalle de la orden..." />
+  }
+
+  if (state.status === 'error') {
+    return <StateMessage type="error" message={state.message ?? 'No se pudo cargar el detalle.'} />
+  }
+
+  if (!state.data) {
+    return null
+  }
+
+  return (
+    <section className="detail-panel">
+      <h2>Detalle de OT #{state.data.id}</h2>
+      <dl>
+        <dt>Descripcion</dt>
+        <dd>{state.data.description}</dd>
+        <dt>Origen</dt>
+        <dd>{originLabels[state.data.origin]}</dd>
+        <dt>Ubicacion</dt>
+        <dd>{textOrEmpty(state.data.location)}</dd>
+        <dt>Estado</dt>
+        <dd>{workOrderStatusLabels[state.data.status]}</dd>
+        <dt>Cuadrilla</dt>
+        <dd>{textOrEmpty(state.data.crew)}</dd>
+      </dl>
+    </section>
+  )
+}
+
+function ProjectForm({
+  disabled,
+  mode,
+  onCancel,
+  onChange,
+  onSubmit,
+  value,
+}: {
+  disabled: boolean
+  mode: 'create' | 'edit'
+  onCancel: () => void
+  onChange: (field: keyof ProjectFormState, value: string) => void
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void
+  value: ProjectFormState
+}) {
+  return (
+    <form className="inline-form" onSubmit={onSubmit}>
+      <div className="form-heading">
+        <h2>{mode === 'edit' ? 'Editar proyecto' : 'Crear proyecto'}</h2>
+        <button type="button" onClick={onCancel} disabled={disabled}>Cancelar</button>
+      </div>
+      <div className="form-grid">
+        <label>
+          Nombre
+          <input required value={value.name} onChange={(event) => onChange('name', event.target.value)} />
+        </label>
+        <label>
+          Ubicacion
+          <input value={value.location} onChange={(event) => onChange('location', event.target.value)} />
+        </label>
+        <label>
+          Presupuesto estimado
+          <input required min="1" type="number" value={value.estimatedBudget} onChange={(event) => onChange('estimatedBudget', event.target.value)} />
+        </label>
+        <label>
+          Fecha estimada
+          <input required type="date" value={value.estimatedStartDate} onChange={(event) => onChange('estimatedStartDate', event.target.value)} />
+        </label>
+        <label>
+          Duracion dias
+          <input required min="1" type="number" value={value.estimatedDurationDays} onChange={(event) => onChange('estimatedDurationDays', event.target.value)} />
+        </label>
+        <label>
+          Responsable tecnico
+          <input value={value.technicalManager} onChange={(event) => onChange('technicalManager', event.target.value)} />
+        </label>
+        <label>
+          Presupuesto aprobado
+          <input min="0" type="number" value={value.approvedBudget} onChange={(event) => onChange('approvedBudget', event.target.value)} />
+        </label>
+        <label>
+          Presupuesto usado
+          <input min="0" type="number" value={value.usedBudget} onChange={(event) => onChange('usedBudget', event.target.value)} />
+        </label>
+        <label>
+          Plazo aprobado dias
+          <input min="1" type="number" value={value.approvedDeadlineDays} onChange={(event) => onChange('approvedDeadlineDays', event.target.value)} />
+        </label>
+        <label>
+          Avance fisico
+          <input max="100" min="0" type="number" value={value.physicalProgress} onChange={(event) => onChange('physicalProgress', event.target.value)} />
+        </label>
+        <label>
+          Contratista
+          <input value={value.contractor} onChange={(event) => onChange('contractor', event.target.value)} />
+        </label>
+        <label className="wide-field">
+          Alcance
+          <textarea value={value.scope} onChange={(event) => onChange('scope', event.target.value)} />
+        </label>
+        <label className="wide-field">
+          Descripcion
+          <textarea value={value.description} onChange={(event) => onChange('description', event.target.value)} />
+        </label>
+      </div>
+      <button type="submit" disabled={disabled}>{mode === 'edit' ? 'Guardar cambios' : 'Crear proyecto'}</button>
+    </form>
+  )
+}
+
+function OrderForm({
+  crewNames,
+  disabled,
+  mode,
+  onCancel,
+  onChange,
+  onSubmit,
+  value,
+}: {
+  crewNames: string[]
+  disabled: boolean
+  mode: 'create' | 'edit'
+  onCancel: () => void
+  onChange: (field: keyof OrderFormState, value: string) => void
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void
+  value: OrderFormState
+}) {
+  return (
+    <form className="inline-form" onSubmit={onSubmit}>
+      <div className="form-heading">
+        <h2>{mode === 'edit' ? 'Editar orden' : 'Crear orden'}</h2>
+        <button type="button" onClick={onCancel} disabled={disabled}>Cancelar</button>
+      </div>
+      <div className="form-grid">
+        <label>
+          Origen
+          <select value={value.origin} onChange={(event) => onChange('origin', event.target.value)}>
+            <option value="MANUAL">Manual</option>
+            <option value="ATENCION_CIUDADANA">Atencion Ciudadana</option>
+            <option value="INSPECCION">Inspeccion</option>
+          </select>
+        </label>
+        <label>
+          Prioridad
+          <select value={value.priority} onChange={(event) => onChange('priority', event.target.value)}>
+            <option value="BAJA">Baja</option>
+            <option value="MEDIA">Media</option>
+            <option value="ALTA">Alta</option>
+          </select>
+        </label>
+        <label>
+          Source request ID
+          <input value={value.sourceRequestId} onChange={(event) => onChange('sourceRequestId', event.target.value)} />
+        </label>
+        <label>
+          Tipo de intervencion
+          <input value={value.interventionType} onChange={(event) => onChange('interventionType', event.target.value)} />
+        </label>
+        <label>
+          Ubicacion
+          <input value={value.location} onChange={(event) => onChange('location', event.target.value)} />
+        </label>
+        <label>
+          Duracion horas
+          <input min="1" type="number" value={value.estimatedDurationHours} onChange={(event) => onChange('estimatedDurationHours', event.target.value)} />
+        </label>
+        <label>
+          Cuadrilla
+          <select value={value.crew} onChange={(event) => onChange('crew', event.target.value)}>
+            <option value="">Sin cuadrilla</option>
+            {crewNames.map((crew) => <option key={crew} value={crew}>{crew}</option>)}
+          </select>
+        </label>
+        <label className="wide-field">
+          Descripcion
+          <textarea required value={value.description} onChange={(event) => onChange('description', event.target.value)} />
+        </label>
+      </div>
+      <button type="submit" disabled={disabled}>{mode === 'edit' ? 'Guardar cambios' : 'Crear orden'}</button>
+    </form>
+  )
+}
+
+function ClosureForm({
+  disabled,
+  onCancel,
+  onChange,
+  onSubmit,
+  value,
+}: {
+  disabled: boolean
+  onCancel: () => void
+  onChange: (field: keyof ClosureFormState, value: string) => void
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void
+  value: ClosureFormState
+}) {
+  return (
+    <form className="inline-form" onSubmit={onSubmit}>
+      <div className="form-heading">
+        <h2>Solicitar corte</h2>
+        <button type="button" onClick={onCancel} disabled={disabled}>Cancelar</button>
+      </div>
+      <div className="form-grid">
+        <label>
+          ID de orden
+          <input required min="1" type="number" value={value.workOrderId} onChange={(event) => onChange('workOrderId', event.target.value)} />
+        </label>
+        <label>
+          Ubicacion
+          <input required value={value.location} onChange={(event) => onChange('location', event.target.value)} />
+        </label>
+        <label>
+          Desde
+          <input required type="date" value={value.requestedFrom} onChange={(event) => onChange('requestedFrom', event.target.value)} />
+        </label>
+        <label>
+          Hasta
+          <input required type="date" value={value.requestedTo} onChange={(event) => onChange('requestedTo', event.target.value)} />
+        </label>
+        <label className="wide-field">
+          Tramos afectados
+          <input
+            required
+            placeholder="Av. Lima 700-760, Estados Unidos 900-960"
+            value={value.affectedSections}
+            onChange={(event) => onChange('affectedSections', event.target.value)}
+          />
+        </label>
+        <label className="wide-field">
+          Motivo
+          <textarea required value={value.reason} onChange={(event) => onChange('reason', event.target.value)} />
+        </label>
+      </div>
+      <button type="submit" disabled={disabled}>Crear solicitud</button>
+    </form>
+  )
+}
+
 function StatusBadge({ value }: { value: string }) {
   return <span className="badge status">{value}</span>
 }
 
 function PriorityBadge({ value }: { value: Prioridad }) {
   return <span className={`badge priority ${value.toLowerCase()}`}>{value}</span>
+}
+
+function emptyProjectForm(): ProjectFormState {
+  return {
+    name: '',
+    description: '',
+    scope: '',
+    location: '',
+    estimatedBudget: '',
+    approvedBudget: '',
+    usedBudget: '',
+    estimatedStartDate: '',
+    estimatedDurationDays: '',
+    approvedDeadlineDays: '',
+    physicalProgress: '',
+    technicalManager: '',
+    contractor: '',
+  }
+}
+
+function emptyOrderForm(): OrderFormState {
+  return {
+    sourceRequestId: '',
+    origin: 'MANUAL',
+    description: '',
+    interventionType: '',
+    location: '',
+    priority: 'MEDIA',
+    estimatedDurationHours: '',
+    crew: '',
+  }
+}
+
+function emptyClosureForm(): ClosureFormState {
+  return {
+    workOrderId: '',
+    location: '',
+    affectedSections: '',
+    requestedFrom: '',
+    requestedTo: '',
+    reason: '',
+  }
+}
+
+function projectToForm(project: ProyectoObra): ProjectFormState {
+  return {
+    name: project.name,
+    description: project.description ?? '',
+    scope: project.scope ?? '',
+    location: project.location ?? '',
+    estimatedBudget: String(project.estimatedBudget),
+    approvedBudget: project.approvedBudget ? String(project.approvedBudget) : '',
+    usedBudget: '',
+    estimatedStartDate: project.estimatedStartDate,
+    estimatedDurationDays: String(project.estimatedDurationDays),
+    approvedDeadlineDays: project.approvedDeadlineDays ? String(project.approvedDeadlineDays) : '',
+    physicalProgress: String(project.physicalProgress),
+    technicalManager: project.technicalManager ?? '',
+    contractor: project.contractor ?? '',
+  }
+}
+
+function orderToForm(order: OrdenTrabajo): OrderFormState {
+  return {
+    sourceRequestId: order.sourceRequestId ?? '',
+    origin: order.origin,
+    description: order.description,
+    interventionType: order.interventionType ?? '',
+    location: order.location ?? '',
+    priority: order.priority,
+    estimatedDurationHours: order.estimatedDurationHours ? String(order.estimatedDurationHours) : '',
+    crew: order.crew ?? '',
+  }
+}
+
+function buildProjectPayload(form: ProjectFormState): ProyectoObraPayload {
+  return {
+    name: form.name.trim(),
+    ...(optionalText(form.description) ? { description: form.description.trim() } : {}),
+    ...(optionalText(form.scope) ? { scope: form.scope.trim() } : {}),
+    ...(optionalText(form.location) ? { location: form.location.trim() } : {}),
+    estimatedBudget: Number(form.estimatedBudget),
+    ...(optionalNumber(form.approvedBudget) !== undefined ? { approvedBudget: Number(form.approvedBudget) } : {}),
+    ...(optionalNumber(form.usedBudget) !== undefined ? { usedBudget: Number(form.usedBudget) } : {}),
+    estimatedStartDate: form.estimatedStartDate,
+    estimatedDurationDays: Number(form.estimatedDurationDays),
+    ...(optionalNumber(form.approvedDeadlineDays) !== undefined ? { approvedDeadlineDays: Number(form.approvedDeadlineDays) } : {}),
+    ...(optionalNumber(form.physicalProgress) !== undefined ? { physicalProgress: Number(form.physicalProgress) } : {}),
+    ...(optionalText(form.technicalManager) ? { technicalManager: form.technicalManager.trim() } : {}),
+    ...(optionalText(form.contractor) ? { contractor: form.contractor.trim() } : {}),
+  }
+}
+
+function buildOrderPayload(form: OrderFormState) {
+  return {
+    ...(optionalText(form.sourceRequestId) ? { sourceRequestId: form.sourceRequestId.trim() } : {}),
+    origin: form.origin,
+    description: form.description.trim(),
+    ...(optionalText(form.interventionType) ? { interventionType: form.interventionType.trim() } : {}),
+    ...(optionalText(form.location) ? { location: form.location.trim() } : {}),
+    priority: form.priority,
+    ...(optionalNumber(form.estimatedDurationHours) !== undefined ? { estimatedDurationHours: Number(form.estimatedDurationHours) } : {}),
+    ...(optionalText(form.crew) ? { crew: form.crew.trim() } : {}),
+  }
+}
+
+function buildClosurePayload(form: ClosureFormState) {
+  return {
+    workOrderId: Number(form.workOrderId),
+    location: form.location.trim(),
+    affectedSections: form.affectedSections.split(',').map((section) => section.trim()).filter(Boolean),
+    requestedFrom: form.requestedFrom,
+    requestedTo: form.requestedTo,
+    reason: form.reason.trim(),
+  }
+}
+
+function optionalText(value: string) {
+  return value.trim() || undefined
+}
+
+function optionalNumber(value: string) {
+  const trimmed = value.trim()
+  return trimmed ? Number(trimmed) : undefined
+}
+
+function textOrEmpty(value?: string | null) {
+  return value?.trim() || 'Sin datos'
+}
+
+function canScheduleOrder(status: WorkOrderStatus) {
+  return status === 'PENDIENTE' || status === 'PROGRAMADA' || status === 'ASIGNADA'
+}
+
+function canStartOrder(status: WorkOrderStatus) {
+  return status === 'PROGRAMADA' || status === 'ASIGNADA' || status === 'PAUSADA' || status === 'REABIERTA'
+}
+
+function canCompleteOrder(status: WorkOrderStatus) {
+  return status === 'EN_EJECUCION' || status === 'PAUSADA'
+}
+
+function formatBackendLabel(value: string) {
+  return value
+    .toLowerCase()
+    .split('_')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+}
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof ApiError) {
+    const details = error.details?.length ? ` (${error.details.join(', ')})` : ''
+    return `${error.message}${details}`
+  }
+
+  if (error instanceof Error) {
+    return error.message
+  }
+
+  return 'Ocurrio un error inesperado.'
 }
 
 export default App

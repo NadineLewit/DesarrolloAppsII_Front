@@ -35,9 +35,20 @@ cp .env.example .env
 Variables:
 
 ```text
-VITE_API_BASE_URL=http://localhost:8080/api
+VITE_API_BASE_URL=/api
+VITE_API_PROXY_TARGET=http://localhost:8080
 VITE_APP_ENV=local
 ```
+
+Para desarrollo local directo contra el backend en `localhost:8080`, definir en
+un archivo `.env` local:
+
+```text
+VITE_API_BASE_URL=http://localhost:8080/api
+```
+
+La alternativa recomendada en desarrollo es dejar `VITE_API_BASE_URL=/api` y
+usar el proxy de Vite con `VITE_API_PROXY_TARGET=http://localhost:8080`.
 
 No subir `.env` ni valores reales de secretos.
 
@@ -94,29 +105,31 @@ Respuesta esperada:
 
 ## Alcance funcional actual
 
-La app arranca con datos mockeados para permitir avanzar antes de que el backend este terminado.
+La app consume la API real del backend de Obras Publicas.
 
 Incluye:
 
-- Dashboard con indicadores de obras, ordenes, alertas externas y demoras.
+- Dashboard con indicadores de obras, ordenes externas y demoras.
 - Navegacion por Proyectos, Ordenes, Recursos, Cortes de calle e Integraciones.
-- Busqueda, filtro por estado y paginacion simulada en Ordenes.
+- Busqueda, filtro por estado y paginacion real en Ordenes.
 - Acciones visibles o bloqueadas segun rol autenticado simulado.
 - Roles alineados al backlog: Personal de Obras Publicas, Ingeniero o Arquitecto, Responsable autorizado, Jefe de Cuadrilla, Operario o Contratista e Inspector de Obra.
 - Eventos de integracion con direccion, modulos y payloads.
-- Ciclo de vida de obra: Borrador, Pendiente de aprobacion, Aprobada, Rechazada, En ejecucion, Suspendida y Finalizada.
+- Ciclo de vida de obra alineado al backend: Borrador, Pendiente de aprobacion, Sin iniciar, En ejecucion, Pausada y Finalizada.
 
 ## Estructura
 
 ```text
 src/
   App.tsx
+  api/
+    obrasApi.ts
   config/
     env.ts
+  constants/
+    ui.ts
   contracts/
     integrations.ts
-  data/
-    mockData.ts
   types.ts
   utils/
     formatters.ts
@@ -163,11 +176,7 @@ src/
 
 ## Pendientes de contrato
 
-- Confirmar URL base de la API del backend.
-- Confirmar JSON exacto de `ProyectoObra`, `OrdenTrabajo`, cuadrillas, maquinaria, materiales y cortes.
-- Confirmar nombres definitivos de enums de estado y prioridad.
-- Confirmar formato de paginacion y filtros, por ejemplo `?estado=...&page=0&size=20`.
-- Confirmar formato comun de errores.
+- Confirmar routing desplegado para que `/api/...` llegue al backend desde el frontend.
 - Confirmar autenticacion, JWT y roles.
 - Confirmar si el frontend debe publicar evidencias fotograficas contra backend o si backend devuelve URL firmada de almacenamiento.
 - Confirmar convenciones comunes de Core para campos comunes de eventos: id unico, tipo, fecha, modulo emisor, version y correlacion.
