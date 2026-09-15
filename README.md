@@ -35,11 +35,14 @@ cp .env.example .env
 Variables:
 
 ```text
-VITE_API_BASE_URL=http://localhost:8080/api
 VITE_APP_ENV=local
+VITE_DEV_API_PROXY_TARGET=
 ```
 
-No subir `.env` ni valores reales de secretos.
+La aplicacion consume siempre el backend con rutas relativas bajo `/api/...`.
+No configurar ni hardcodear URLs publicas del backend, direcciones locales, tokens ni secretos en el codigo del frontend.
+
+Para conectar el frontend local con un backend local, configurar `VITE_DEV_API_PROXY_TARGET` en un archivo `.env.local` no versionado. Ese valor lo usa solo el proxy de desarrollo de Vite; el codigo de la aplicacion sigue llamando a `/api/...`.
 
 ## Comandos reproducibles
 
@@ -94,29 +97,31 @@ Respuesta esperada:
 
 ## Alcance funcional actual
 
-La app arranca con datos mockeados para permitir avanzar antes de que el backend este terminado.
+La app consume la API real del backend de Obras Publicas.
 
 Incluye:
 
-- Dashboard con indicadores de obras, ordenes, alertas externas y demoras.
+- Dashboard con indicadores de obras, ordenes externas y demoras.
 - Navegacion por Proyectos, Ordenes, Recursos, Cortes de calle e Integraciones.
-- Busqueda, filtro por estado y paginacion simulada en Ordenes.
+- Busqueda, filtro por estado y paginacion real en Ordenes.
 - Acciones visibles o bloqueadas segun rol autenticado simulado.
 - Roles alineados al backlog: Personal de Obras Publicas, Ingeniero o Arquitecto, Responsable autorizado, Jefe de Cuadrilla, Operario o Contratista e Inspector de Obra.
 - Eventos de integracion con direccion, modulos y payloads.
-- Ciclo de vida de obra: Borrador, Pendiente de aprobacion, Aprobada, Rechazada, En ejecucion, Suspendida y Finalizada.
+- Ciclo de vida de obra alineado al backend: Borrador, Pendiente de aprobacion, Sin iniciar, En ejecucion, Pausada y Finalizada.
 
 ## Estructura
 
 ```text
 src/
   App.tsx
+  api/
+    obrasApi.ts
   config/
     env.ts
+  constants/
+    ui.ts
   contracts/
     integrations.ts
-  data/
-    mockData.ts
   types.ts
   utils/
     formatters.ts
@@ -163,7 +168,6 @@ src/
 
 ## Pendientes de contrato
 
-- Confirmar URL base de la API del backend.
 - Confirmar JSON exacto de `ProyectoObra`, `OrdenTrabajo`, cuadrillas, maquinaria, materiales y cortes.
 - Confirmar nombres definitivos de enums de estado y prioridad.
 - Confirmar formato de paginacion y filtros, por ejemplo `?estado=...&page=0&size=20`.

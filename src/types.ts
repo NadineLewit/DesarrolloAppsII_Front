@@ -5,82 +5,179 @@ export type Rol =
   | 'JEFE_CUADRILLA'
   | 'OPERARIO_CONTRATISTA'
   | 'INSPECTOR_OBRA'
+
 export type Seccion = 'dashboard' | 'obras' | 'ordenes' | 'recursos' | 'cortes' | 'integraciones'
-export type EstadoObra =
+
+export type ProjectStatus =
   | 'BORRADOR'
   | 'PENDIENTE_APROBACION'
-  | 'APROBADA'
-  | 'RECHAZADA'
+  | 'APROBADO'
+  | 'RECHAZADO'
+  | 'SIN_INICIAR'
   | 'EN_EJECUCION'
-  | 'SUSPENDIDA'
+  | 'PAUSADA'
   | 'FINALIZADA'
-export type EstadoOrden =
-  | 'CREADA'
+
+export type WorkOrderStatus =
+  | 'PENDIENTE'
   | 'PROGRAMADA'
   | 'ASIGNADA'
-  | 'INICIADA'
+  | 'EN_EJECUCION'
   | 'PAUSADA'
-  | 'DEMORADA'
-  | 'REPROGRAMADA'
-  | 'FINALIZADA'
+  | 'COMPLETADA'
   | 'VALIDADA'
   | 'REABIERTA'
-export type Prioridad = 'BAJA' | 'MEDIA' | 'ALTA' | 'CRITICA'
+
+export type WorkOrderPriority = 'BAJA' | 'MEDIA' | 'ALTA'
+export type WorkOrderOrigin = 'MANUAL' | 'ATENCION_CIUDADANA' | 'INSPECCION'
+
+export type EstadoObra = ProjectStatus
+export type EstadoOrden = WorkOrderStatus
+export type Prioridad = WorkOrderPriority
 
 export type ProyectoObra = {
   id: number
-  nombre: string
-  descripcion: string
-  alcance: string
-  ubicacion: string
-  presupuesto: number
-  presupuestoAprobado?: number
-  fechaEstimadaInicio: string
-  duracionEstimadaDias: number
-  plazoAprobadoDias?: number
-  fechaAprobacion?: string
-  avanceFisico: number
-  avancePresupuestario: number
-  estado: EstadoObra
-  responsableTecnico: string
-  contratista?: string
-  demoraDias: number
-  motivoRechazo?: string
+  name: string
+  description?: string | null
+  scope?: string | null
+  location?: string | null
+  estimatedBudget: number
+  approvedBudget?: number | null
+  estimatedStartDate: string
+  estimatedDurationDays: number
+  approvedDeadlineDays?: number | null
+  physicalProgress: number
+  budgetProgress: number
+  status: ProjectStatus
+  technicalManager?: string | null
+  contractor?: string | null
+}
+
+export type ProyectoObraPayload = {
+  name: string
+  description?: string
+  scope?: string
+  location?: string
+  estimatedBudget: number
+  approvedBudget?: number
+  usedBudget?: number
+  estimatedStartDate: string
+  estimatedDurationDays: number
+  approvedDeadlineDays?: number
+  physicalProgress?: number
+  technicalManager?: string
+  contractor?: string
 }
 
 export type OrdenTrabajo = {
   id: number
-  sourceRequestId: string
-  origen: 'Atencion Ciudadana' | 'Ambiente' | 'Transito' | 'Manual'
-  descripcion: string
-  tipo: string
-  ubicacion: string
-  prioridad: Prioridad
-  estado: EstadoOrden
-  cuadrilla: string
-  fechaProgramada: string
-  duracionEstimadaHoras: number
-  evidencia: boolean
-  outcome?: 'SUCCESS' | 'REQUIRES_REVISION'
+  sourceRequestId?: string | null
+  origin: WorkOrderOrigin
+  description: string
+  interventionType?: string | null
+  location?: string | null
+  priority: WorkOrderPriority
+  status: WorkOrderStatus
+  crew?: string | null
+  scheduledDate?: string | null
+  estimatedDurationHours?: number | null
+  hasEvidence: boolean
+  outcome?: string | null
 }
 
-export type Recurso = {
+export type OrdenTrabajoPayload = {
+  sourceRequestId?: string
+  origin: WorkOrderOrigin
+  description: string
+  interventionType?: string
+  location?: string
+  priority: WorkOrderPriority
+  estimatedDurationHours?: number
+  crew?: string
+}
+
+export type ScheduleOTPayload = {
+  scheduledDate: string
+  crew?: string
+}
+
+export type CompleteOTPayload = {
+  outcome?: string
+}
+
+export type ValidateOTPayload = {
+  approved: boolean
+  observations?: string
+}
+
+export type Cuadrilla = {
+  id: number
   nombre: string
-  tipo: 'Cuadrilla' | 'Maquinaria' | 'Material'
-  disponibilidad: string
-  carga: number
+}
+
+export type Material = {
+  id: number
+  nombre: string
+  unidad?: string | null
+}
+
+export type Maquinaria = {
+  id: number
+  nombre: string
+}
+
+export type ResourcesSummary = {
+  crews: Cuadrilla[]
+  materials: Material[]
+  machinery: Maquinaria[]
 }
 
 export type CorteCalle = {
   id: number
   closureRequestId: string
-  sourceModule: 'public-works'
+  sourceModule: string
   workOrderId: number
-  ubicacion: string
-  tramosAfectados: string[]
-  estado: 'Autorizado' | 'Pendiente' | 'Rechazado'
-  desde: string
-  hasta: string
-  condiciones?: string
-  motivoRechazo?: string
+  location: string
+  affectedSections: string[]
+  status: string
+  requestedFrom: string
+  requestedTo: string
+  reason: string
+}
+
+export type CorteCallePayload = {
+  workOrderId: number
+  location: string
+  affectedSections: string[]
+  requestedFrom: string
+  requestedTo: string
+  reason: string
+}
+
+export type DashboardSummary = {
+  asOfDate: string
+  totalProjects: number
+  activeProjects: number
+  openWorkOrders: number
+  externalWorkOrders: number
+  delayedWorkOrders: number
+  delayedProjects: number
+  averagePhysicalProgress: number
+  estimatedBudget: number
+  approvedBudget: number
+  usedBudget: number
+  budgetProgress: number
+  crewLoads: Array<{
+    crewId: number
+    name: string
+    openWorkOrders: number
+  }>
+}
+
+export type PageResponse<T> = {
+  content: T[]
+  page: number
+  size: number
+  totalElements: number
+  totalPages: number
 }
