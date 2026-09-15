@@ -105,7 +105,7 @@ async function request<T>(path: string, options: RequestOptions = {}) {
 
   if (!contentType.includes('application/json')) {
     throw new ApiError(
-      'La API devolvio una respuesta que no es JSON. Revisa VITE_API_BASE_URL o el proxy /api del entorno.',
+      'La API devolvio una respuesta que no es JSON. Revisa VITE_DEV_API_PROXY_TARGET o el proxy /api del entorno.',
       response.status,
     )
   }
