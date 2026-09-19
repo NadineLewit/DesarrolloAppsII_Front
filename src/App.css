@@ -154,6 +154,74 @@ h2 {
   font-weight: 700;
 }
 
+.session-summary {
+  display: grid;
+  gap: 2px;
+  max-width: 220px;
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.session-summary strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.logout-button {
+  min-height: 40px;
+}
+
+.login-page {
+  display: grid;
+  min-height: 100svh;
+  place-items: center;
+  padding: 24px;
+  background: linear-gradient(135deg, #102a3a, #0f766e);
+}
+
+.login-card {
+  display: grid;
+  width: min(100%, 430px);
+  gap: 16px;
+  padding: 32px;
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.login-card > svg {
+  width: 42px;
+  height: 42px;
+  padding: 9px;
+  border-radius: 8px;
+  color: white;
+  background: var(--primary);
+}
+
+.login-card label {
+  display: grid;
+  gap: 6px;
+  color: var(--text-soft);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.login-card input,
+.login-card select {
+  width: 100%;
+  min-height: 42px;
+  padding: 8px 10px;
+}
+
+.login-card small {
+  color: var(--text-soft);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .role-picker select,
 .filters select,
 .inline-form input,
@@ -161,6 +229,19 @@ h2 {
 .inline-form textarea {
   width: 100%;
   padding: 8px 34px 8px 10px;
+}
+
+.field-error {
+  display: block;
+  margin-top: 5px;
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+input[aria-invalid="true"],
+textarea[aria-invalid="true"] {
+  border-color: var(--danger);
 }
 
 .inline-form textarea {
@@ -656,6 +737,34 @@ h2 {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
   line-height: 1.45;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgb(15 23 42 / 55%);
+}
+
+.approval-modal {
+  display: grid;
+  gap: 16px;
+  width: min(100%, 520px);
+  padding: 24px;
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 20px 60px rgb(15 23 42 / 35%);
+}
+
+.approval-modal label {
+  display: grid;
+  gap: 7px;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
 }
 
 @media (max-width: 1100px) {

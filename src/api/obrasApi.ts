@@ -4,12 +4,14 @@ import type {
   CorteCalle,
   CorteCallePayload,
   DashboardSummary,
+  LoginResponse,
   OrdenTrabajo,
   OrdenTrabajoPayload,
   PageResponse,
   ProjectStatus,
   ProyectoObra,
   ProyectoObraPayload,
+  ProjectApprovalPayload,
   ResourcesSummary,
   ScheduleOTPayload,
   ValidateOTPayload,
@@ -76,6 +78,11 @@ async function request<T>(path: string, options: RequestOptions = {}) {
     headers.set('Content-Type', 'application/json')
   }
 
+  const accessToken = window.sessionStorage.getItem('obras-publicas-access-token')
+  if (accessToken && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${accessToken}`)
+  }
+
   const response = await fetch(buildUrl(path, options.params), {
     ...options,
     headers,
@@ -138,6 +145,9 @@ export type ListStreetClosuresParams = {
 }
 
 export const obrasApi = {
+  login(username: string, password: string) {
+    return request<LoginResponse>('/auth/login', { method: 'POST', body: { username, password } })
+  },
   listProjects(params: ListProjectsParams = {}) {
     return request<PageResponse<ProyectoObra>>('/public-works/projects', { params })
   },
@@ -153,8 +163,8 @@ export const obrasApi = {
   submitProjectForApproval(id: number) {
     return request<ProyectoObra>(`/public-works/projects/${id}/submit-approval`, { method: 'PATCH' })
   },
-  approveProject(id: number) {
-    return request<ProyectoObra>(`/public-works/projects/${id}/approve`, { method: 'PATCH' })
+  approveProject(id: number, body: ProjectApprovalPayload) {
+    return request<ProyectoObra>(`/public-works/projects/${id}/approve`, { method: 'PATCH', body })
   },
   rejectProject(id: number) {
     return request<ProyectoObra>(`/public-works/projects/${id}/reject`, { method: 'PATCH' })

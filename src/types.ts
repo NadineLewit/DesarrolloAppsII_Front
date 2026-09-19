@@ -51,6 +51,16 @@ export type ProyectoObra = {
   status: ProjectStatus
   technicalManager?: string | null
   contractor?: string | null
+  approvedAt?: string | null
+  approvalObservations?: string | null
+}
+
+export type ProjectApprovalPayload = { approvedBudget: number; approvedDeadlineDays: number; approvedAt: string; observations?: string }
+
+export type LoginResponse = {
+  accessToken: string
+  username: string
+  role: Rol
 }
 
 export type ProyectoObraPayload = {
