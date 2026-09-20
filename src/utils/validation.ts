@@ -10,6 +10,7 @@ export type ProjectInput = {
 
 export type WorkOrderInput = {
   origin: string
+  projectId: string
   sourceRequestId: string
   description: string
   interventionType: string
@@ -57,17 +58,35 @@ export function validateWorkOrder(input: WorkOrderInput): FormErrors {
   const errors: FormErrors = {}
   const fields: Array<[keyof WorkOrderInput, string]> = [
     ['description', 'La descripción es obligatoria.'],
-    ['interventionType', 'El tipo de intervención es obligatorio.'],
-    ['location', 'La ubicación es obligatoria.'],
     ['estimatedDurationHours', 'La duración estimada es obligatoria.'],
-    ['crew', 'La cuadrilla es obligatoria para programar e iniciar la orden.'],
   ]
+  if (input.origin !== 'PROYECTO') {
+    fields.push(
+      ['interventionType', 'El tipo de intervención es obligatorio.'],
+      ['location', 'La ubicación es obligatoria.'],
+      ['crew', 'La cuadrilla es obligatoria para programar e iniciar la orden.'],
+    )
+  }
   fields.forEach(([field, message]) => {
     const error = required(input[field], message)
     if (error) errors[field] = error
   })
-  if (input.origin !== 'MANUAL' && !input.sourceRequestId.trim()) errors.sourceRequestId = 'El identificador de la solicitud de origen es obligatorio.'
+  if ((input.origin === 'ATENCION_CIUDADANA' || input.origin === 'INSPECCION') && !input.sourceRequestId.trim()) errors.sourceRequestId = 'El identificador de la solicitud de origen es obligatorio.'
+  if (input.origin === 'PROYECTO' && (!Number.isInteger(Number(input.projectId)) || Number(input.projectId) <= 0)) errors.projectId = 'Seleccioná un proyecto válido.'
   if (input.estimatedDurationHours && Number(input.estimatedDurationHours) <= 0) errors.estimatedDurationHours = 'La duración debe ser mayor a 0.'
+  return errors
+}
+
+export function validateProjectApproval(input: { approvedBudget: string; approvedDeadlineDays: string; approvedAt: string; observations: string }): FormErrors {
+  const errors: FormErrors = {}
+  const budget = Number(input.approvedBudget)
+  const deadline = Number(input.approvedDeadlineDays)
+  if (!Number.isFinite(budget) || budget <= 0 || !/^\d{1,13}(\.\d{1,2})?$/.test(input.approvedBudget.trim())) {
+    errors.approvedBudget = 'Ingresá un presupuesto positivo de hasta 13 enteros y 2 decimales.'
+  }
+  if (!Number.isInteger(deadline) || deadline <= 0) errors.approvedDeadlineDays = 'El plazo debe ser un número entero mayor a 0.'
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.approvedAt) || Number.isNaN(Date.parse(`${input.approvedAt}T00:00:00`))) errors.approvedAt = 'Ingresá una fecha válida.'
+  if (input.observations.length > 1000) errors.observations = 'Las observaciones no pueden superar 1000 caracteres.'
   return errors
 }
 

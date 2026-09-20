@@ -42,7 +42,7 @@ import type {
   WorkOrderStatus,
 } from './types'
 import { formatMoney } from './utils/formatters'
-import { hasErrors, type FormErrors, validateProject, validateStreetClosure, validateWorkOrder } from './utils/validation'
+import { hasErrors, type FormErrors, validateProject, validateProjectApproval, validateStreetClosure, validateWorkOrder } from './utils/validation'
 import './App.css'
 
 const ORDER_PAGE_SIZE = 5
@@ -84,6 +84,7 @@ type ProjectFormState = {
 type OrderFormState = {
   sourceRequestId: string
   origin: WorkOrderOrigin
+  projectId: string
   description: string
   interventionType: string
   location: string
@@ -106,6 +107,7 @@ function App() {
   const [session, setSession] = useState<AuthSession | null>(() => restoreSession())
   const [busqueda, setBusqueda] = useState('')
   const [estadoOrden, setEstadoOrden] = useState<'TODOS' | WorkOrderStatus>('TODOS')
+  const [origenOrden, setOrigenOrden] = useState<'TODOS' | WorkOrderOrigin>('TODOS')
   const [pagina, setPagina] = useState(1)
   const [dashboard, setDashboard] = useState<RemoteState<DashboardSummary>>({ status: 'loading' })
   const [projects, setProjects] = useState<RemoteState<PageResponse<ProyectoObra>>>({ status: 'loading' })
@@ -130,6 +132,7 @@ function App() {
   const [approvalProject, setApprovalProject] = useState<ProyectoObra | null>(null)
 
   const rol = session?.role ?? 'PERSONAL_OBRAS'
+  const accessToken = session?.accessToken
   const permisos = permisosPorRol[rol]
 
   const crews = useMemo(() => resources.data?.crews ?? [], [resources.data?.crews])
@@ -206,6 +209,7 @@ function App() {
         data: await obrasApi.listWorkOrders({
           search: busqueda,
           status: estadoOrden === 'TODOS' ? undefined : estadoOrden,
+          origin: origenOrden === 'TODOS' ? undefined : origenOrden,
           page: pagina - 1,
           size: ORDER_PAGE_SIZE,
           sort: 'id,asc',
@@ -214,7 +218,7 @@ function App() {
     } catch (error) {
       setOrders({ status: 'error', message: getErrorMessage(error) })
     }
-  }, [busqueda, estadoOrden, pagina])
+  }, [busqueda, estadoOrden, origenOrden, pagina])
 
   const loadResources = useCallback(async () => {
     setResources({ status: 'loading' })
@@ -256,6 +260,25 @@ function App() {
   useEffect(() => {
     void loadOrders()
   }, [loadOrders])
+
+  useEffect(() => {
+    const onUnauthorized = () => {
+      window.sessionStorage.removeItem('obras-publicas-session')
+      window.sessionStorage.removeItem('obras-publicas-access-token')
+      setSession(null)
+    }
+    window.addEventListener('obras-api-unauthorized', onUnauthorized)
+    return () => window.removeEventListener('obras-api-unauthorized', onUnauthorized)
+  }, [])
+
+  useEffect(() => {
+    if (!accessToken) return
+    void obrasApi.me().then(({ username, role }) => {
+      setSession((current) => current ? { ...current, name: username, role } : current)
+    }).catch(() => {
+      // A 401 already clears local session through the shared API handler.
+    })
+  }, [accessToken])
 
   async function refreshCoreData() {
     await Promise.all([loadDashboard(), loadProjects(), loadOrders()])
@@ -476,7 +499,15 @@ function App() {
     setSession(nextSession)
   }
 
-  function handleLogout() {
+  async function handleLogout() {
+    try {
+      await obrasApi.logout()
+    } catch (error) {
+      if (!(error instanceof ApiError) || error.status !== 401) {
+        setFeedback({ type: 'error', message: getErrorMessage(error) })
+        return
+      }
+    }
     window.sessionStorage.removeItem('obras-publicas-session')
     window.sessionStorage.removeItem('obras-publicas-access-token')
     setSession(null)
@@ -660,8 +691,9 @@ function App() {
                       <span>Estimado {formatMoney(project.estimatedBudget)} - {project.estimatedDurationDays} dias</span>
                     </div>
                     <StatusBadge value={projectStatusLabels[project.status] ?? project.status} />
-                    <span>{project.physicalProgress}% fisico</span>
-                    <span>{project.budgetProgress}% presupuesto</span>
+                      <span>{project.physicalProgress}% fisico</span>
+                      <span>{project.budgetProgress}% presupuesto</span>
+                      {project.status === 'APROBADO' && <span>Aprobado: {formatMoney(project.approvedBudget ?? 0)} - {project.approvedDeadlineDays ?? 0} días</span>}
                     <div className="row-actions">
                       <button type="button" disabled={busy} onClick={() => void loadProjectDetail(project.id)}>
                         Detalle
@@ -733,6 +765,7 @@ function App() {
             {orderFormMode !== 'closed' && (
               <OrderForm
                 crewNames={crewNames}
+                projects={projects.data?.content ?? []}
                 disabled={busy}
                 errors={orderErrors}
                 mode={orderFormMode}
@@ -771,6 +804,18 @@ function App() {
                   <option key={status} value={status}>{workOrderStatusLabels[status]}</option>
                 ))}
               </select>
+              <select
+                value={origenOrden}
+                onChange={(event) => {
+                  setOrigenOrden(event.target.value as 'TODOS' | WorkOrderOrigin)
+                  setPagina(1)
+                }}
+              >
+                <option value="TODOS">Todos los orígenes</option>
+                {Object.entries(originLabels).map(([origin, label]) => (
+                  <option key={origin} value={origin}>{label}</option>
+                ))}
+              </select>
             </div>
 
             {orders.status === 'loading' && <StateMessage type="loading" message="Cargando ordenes desde backend..." />}
@@ -788,6 +833,7 @@ function App() {
                       <strong>OT #{order.id} - {order.description}</strong>
                       <span>{textOrEmpty(order.location)} - {textOrEmpty(order.interventionType)} - {order.scheduledDate ?? 'Sin fecha'}</span>
                       <span>{originLabels[order.origin]} - {order.sourceRequestId ?? 'Sin origen externo'} - {order.estimatedDurationHours ?? 0} h estimadas</span>
+                      {order.projectId && <span>Proyecto asociado: #{order.projectId}</span>}
                     </div>
                     <PriorityBadge value={order.priority} />
                     <StatusBadge value={workOrderStatusLabels[order.status]} />
@@ -1076,8 +1122,9 @@ function ProjectApprovalForm({
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!approvedAt || Number(approvedBudget) <= 0 || Number(approvedDeadlineDays) <= 0) {
-      setError('Completá presupuesto, plazo y fecha de aprobación válidos.')
+    const errors = validateProjectApproval({ approvedBudget, approvedDeadlineDays, approvedAt, observations })
+    if (hasErrors(errors)) {
+      setError(Object.values(errors)[0])
       return
     }
     onSubmit({
@@ -1112,7 +1159,7 @@ function ProjectApprovalForm({
         </label>
         <label>
           Observaciones
-          <textarea value={observations} onChange={(event) => setObservations(event.target.value)} />
+          <textarea maxLength={1000} value={observations} onChange={(event) => setObservations(event.target.value)} />
         </label>
         {error && <p className="field-error" role="alert">{error}</p>}
         <button type="submit" disabled={disabled}>{disabled ? 'Aprobando...' : 'Confirmar aprobación'}</button>
@@ -1199,6 +1246,14 @@ function ProjectDetail({ state }: { state: RemoteState<ProyectoObra> }) {
         <dd>{textOrEmpty(state.data.contractor)}</dd>
         <dt>Estado</dt>
         <dd>{projectStatusLabels[state.data.status] ?? state.data.status}</dd>
+        <dt>Presupuesto aprobado</dt>
+        <dd>{state.data.approvedBudget ? formatMoney(state.data.approvedBudget) : 'Sin aprobar'}</dd>
+        <dt>Plazo aprobado</dt>
+        <dd>{state.data.approvedDeadlineDays ? `${state.data.approvedDeadlineDays} días` : 'Sin aprobar'}</dd>
+        <dt>Fecha de aprobación</dt>
+        <dd>{state.data.approvedAt ?? 'Sin aprobar'}</dd>
+        <dt>Observaciones de aprobación</dt>
+        <dd>{textOrEmpty(state.data.approvalObservations)}</dd>
       </dl>
     </section>
   )
@@ -1225,6 +1280,8 @@ function OrderDetail({ state }: { state: RemoteState<OrdenTrabajo> }) {
         <dd>{state.data.description}</dd>
         <dt>Origen</dt>
         <dd>{originLabels[state.data.origin]}</dd>
+        <dt>Proyecto asociado</dt>
+        <dd>{state.data.projectId ? `Proyecto #${state.data.projectId}` : 'No asociado'}</dd>
         <dt>Ubicacion</dt>
         <dd>{textOrEmpty(state.data.location)}</dd>
         <dt>Estado</dt>
@@ -1291,16 +1348,8 @@ function ProjectForm({
           {errors.technicalManager && <small className="field-error">{errors.technicalManager}</small>}
         </label>
         <label>
-          Presupuesto aprobado
-          <input min="0" type="number" value={value.approvedBudget} onChange={(event) => onChange('approvedBudget', event.target.value)} />
-        </label>
-        <label>
           Presupuesto usado
           <input min="0" type="number" value={value.usedBudget} onChange={(event) => onChange('usedBudget', event.target.value)} />
-        </label>
-        <label>
-          Plazo aprobado dias
-          <input min="1" type="number" value={value.approvedDeadlineDays} onChange={(event) => onChange('approvedDeadlineDays', event.target.value)} />
         </label>
         <label>
           Avance fisico
@@ -1327,6 +1376,7 @@ function ProjectForm({
 
 function OrderForm({
   crewNames,
+  projects,
   disabled,
   errors,
   mode,
@@ -1336,6 +1386,7 @@ function OrderForm({
   value,
 }: {
   crewNames: string[]
+  projects: ProyectoObra[]
   disabled: boolean
   errors: FormErrors
   mode: 'create' | 'edit'
@@ -1353,12 +1404,26 @@ function OrderForm({
       <div className="form-grid">
         <label>
           Origen
-          <select value={value.origin} onChange={(event) => onChange('origin', event.target.value)}>
+          <select value={value.origin} onChange={(event) => {
+            onChange('origin', event.target.value)
+            if (event.target.value !== 'PROYECTO') onChange('projectId', '')
+          }}>
             <option value="MANUAL">Manual</option>
             <option value="ATENCION_CIUDADANA">Atencion Ciudadana</option>
             <option value="INSPECCION">Inspeccion</option>
+            <option value="PROYECTO">Proyecto</option>
           </select>
         </label>
+        {value.origin === 'PROYECTO' && (
+          <label>
+            Proyecto asociado
+            <select required value={value.projectId} onChange={(event) => onChange('projectId', event.target.value)}>
+              <option value="">Seleccionar proyecto</option>
+              {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+            </select>
+            {errors.projectId && <small className="field-error">{errors.projectId}</small>}
+          </label>
+        )}
         <label>
           Prioridad
           <select value={value.priority} onChange={(event) => onChange('priority', event.target.value)}>
@@ -1374,12 +1439,12 @@ function OrderForm({
         </label>
         <label>
           Tipo de intervencion
-          <input required value={value.interventionType} onChange={(event) => onChange('interventionType', event.target.value)} />
+          <input value={value.interventionType} onChange={(event) => onChange('interventionType', event.target.value)} />
           {errors.interventionType && <small className="field-error">{errors.interventionType}</small>}
         </label>
         <label>
           Ubicacion
-          <input required value={value.location} onChange={(event) => onChange('location', event.target.value)} />
+          <input value={value.location} onChange={(event) => onChange('location', event.target.value)} />
           {errors.location && <small className="field-error">{errors.location}</small>}
         </label>
         <label>
@@ -1389,7 +1454,7 @@ function OrderForm({
         </label>
         <label>
           Cuadrilla
-          <select required value={value.crew} onChange={(event) => onChange('crew', event.target.value)}>
+          <select value={value.crew} onChange={(event) => onChange('crew', event.target.value)}>
             <option value="">Seleccionar cuadrilla</option>
             {crewNames.map((crew) => <option key={crew} value={crew}>{crew}</option>)}
           </select>
@@ -1498,6 +1563,7 @@ function emptyOrderForm(): OrderFormState {
   return {
     sourceRequestId: '',
     origin: 'MANUAL',
+    projectId: '',
     description: '',
     interventionType: '',
     location: '',
@@ -1540,6 +1606,7 @@ function orderToForm(order: OrdenTrabajo): OrderFormState {
   return {
     sourceRequestId: order.sourceRequestId ?? '',
     origin: order.origin,
+    projectId: order.projectId ? String(order.projectId) : '',
     description: order.description,
     interventionType: order.interventionType ?? '',
     location: order.location ?? '',
@@ -1556,11 +1623,9 @@ function buildProjectPayload(form: ProjectFormState): ProyectoObraPayload {
     ...(optionalText(form.scope) ? { scope: form.scope.trim() } : {}),
     ...(optionalText(form.location) ? { location: form.location.trim() } : {}),
     estimatedBudget: Number(form.estimatedBudget),
-    ...(optionalNumber(form.approvedBudget) !== undefined ? { approvedBudget: Number(form.approvedBudget) } : {}),
     ...(optionalNumber(form.usedBudget) !== undefined ? { usedBudget: Number(form.usedBudget) } : {}),
     estimatedStartDate: form.estimatedStartDate,
     estimatedDurationDays: Number(form.estimatedDurationDays),
-    ...(optionalNumber(form.approvedDeadlineDays) !== undefined ? { approvedDeadlineDays: Number(form.approvedDeadlineDays) } : {}),
     ...(optionalNumber(form.physicalProgress) !== undefined ? { physicalProgress: Number(form.physicalProgress) } : {}),
     ...(optionalText(form.technicalManager) ? { technicalManager: form.technicalManager.trim() } : {}),
     ...(optionalText(form.contractor) ? { contractor: form.contractor.trim() } : {}),
@@ -1571,6 +1636,7 @@ function buildOrderPayload(form: OrderFormState) {
   return {
     ...(optionalText(form.sourceRequestId) ? { sourceRequestId: form.sourceRequestId.trim() } : {}),
     origin: form.origin,
+    ...(form.origin === 'PROYECTO' ? { projectId: Number(form.projectId) } : { projectId: null }),
     description: form.description.trim(),
     ...(optionalText(form.interventionType) ? { interventionType: form.interventionType.trim() } : {}),
     ...(optionalText(form.location) ? { location: form.location.trim() } : {}),
