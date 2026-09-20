@@ -44,6 +44,16 @@ No configurar ni hardcodear URLs publicas del backend, direcciones locales, toke
 
 Para conectar el frontend local con un backend local, configurar `VITE_DEV_API_PROXY_TARGET` en un archivo `.env.local` no versionado. Ese valor lo usa solo el proxy de desarrollo de Vite; el codigo de la aplicacion sigue llamando a `/api/...`.
 
+Ejemplo para el backend del equipo ejecutándose localmente:
+
+```text
+VITE_DEV_API_PROXY_TARGET=http://localhost:8080
+```
+
+## Acceso y roles
+
+La aplicación solicita usuario y contraseña mediante `POST /api/auth/login`. El backend devuelve un JWT con el rol asignado; el token se conserva solo durante la pestaña y se envía como `Authorization: Bearer ...` en las rutas protegidas bajo `/api`.
+
 ## Comandos reproducibles
 
 ```bash
@@ -104,8 +114,11 @@ Incluye:
 - Dashboard con indicadores de obras, ordenes externas y demoras.
 - Navegacion por Proyectos, Ordenes, Recursos, Cortes de calle e Integraciones.
 - Busqueda, filtro por estado y paginacion real en Ordenes.
-- Acciones visibles o bloqueadas segun rol autenticado simulado.
+- Acciones visibles o bloqueadas segun el rol autenticado por JWT.
 - Roles alineados al backlog: Personal de Obras Publicas, Ingeniero o Arquitecto, Responsable autorizado, Jefe de Cuadrilla, Operario o Contratista e Inspector de Obra.
+- Formulario de nuevo proyecto con validaciones de nombre, alcance, ubicación, presupuesto, duración y responsable técnico; mantiene el formulario abierto si falla la API.
+- Modal de aprobación para Responsable Autorizado con presupuesto, plazo, fecha y observaciones, conectado al `PATCH /api/public-works/projects/{id}/approve`.
+- Bloqueo de inicio de orden sin cuadrilla y bloqueo visual cuando existe un corte de calle pendiente de autorizacion.
 - Eventos de integracion con direccion, modulos y payloads.
 - Ciclo de vida de obra alineado al backend: Borrador, Pendiente de aprobacion, Sin iniciar, En ejecucion, Pausada y Finalizada.
 
@@ -172,7 +185,6 @@ src/
 - Confirmar nombres definitivos de enums de estado y prioridad.
 - Confirmar formato de paginacion y filtros, por ejemplo `?estado=...&page=0&size=20`.
 - Confirmar formato comun de errores.
-- Confirmar autenticacion, JWT y roles.
 - Confirmar si el frontend debe publicar evidencias fotograficas contra backend o si backend devuelve URL firmada de almacenamiento.
 - Confirmar convenciones comunes de Core para campos comunes de eventos: id unico, tipo, fecha, modulo emisor, version y correlacion.
 - Confirmar con M6 si `workOrderCompleted` cierra definitivamente la solicitud o si debe esperar `workOrderValidated`.

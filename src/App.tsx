@@ -9,6 +9,7 @@ import {
   FileText,
   Gauge,
   Hammer,
+  LogOut,
   Network,
   PauseCircle,
   PlayCircle,
@@ -32,6 +33,7 @@ import type {
   Prioridad,
   ProyectoObra,
   ProyectoObraPayload,
+  ProjectApprovalPayload,
   ResourcesSummary,
   Rol,
   Seccion,
@@ -40,6 +42,7 @@ import type {
   WorkOrderStatus,
 } from './types'
 import { formatMoney } from './utils/formatters'
+import { hasErrors, type FormErrors, validateProject, validateProjectApproval, validateStreetClosure, validateWorkOrder } from './utils/validation'
 import './App.css'
 
 const ORDER_PAGE_SIZE = 5
@@ -54,6 +57,12 @@ type RemoteState<T> = {
 type Feedback = {
   type: 'success' | 'error'
   message: string
+}
+
+type AuthSession = {
+  name: string
+  role: Rol
+  accessToken: string
 }
 
 type ProjectFormState = {
@@ -75,6 +84,7 @@ type ProjectFormState = {
 type OrderFormState = {
   sourceRequestId: string
   origin: WorkOrderOrigin
+  projectId: string
   description: string
   interventionType: string
   location: string
@@ -94,9 +104,10 @@ type ClosureFormState = {
 
 function App() {
   const [seccionActiva, setSeccionActiva] = useState<Seccion>('dashboard')
-  const [rol, setRol] = useState<Rol>('PERSONAL_OBRAS')
+  const [session, setSession] = useState<AuthSession | null>(() => restoreSession())
   const [busqueda, setBusqueda] = useState('')
   const [estadoOrden, setEstadoOrden] = useState<'TODOS' | WorkOrderStatus>('TODOS')
+  const [origenOrden, setOrigenOrden] = useState<'TODOS' | WorkOrderOrigin>('TODOS')
   const [pagina, setPagina] = useState(1)
   const [dashboard, setDashboard] = useState<RemoteState<DashboardSummary>>({ status: 'loading' })
   const [projects, setProjects] = useState<RemoteState<PageResponse<ProyectoObra>>>({ status: 'loading' })
@@ -110,12 +121,18 @@ function App() {
   const [projectFormMode, setProjectFormMode] = useState<'closed' | 'create' | 'edit'>('closed')
   const [editingProjectId, setEditingProjectId] = useState<number | null>(null)
   const [projectForm, setProjectForm] = useState<ProjectFormState>(emptyProjectForm)
+  const [projectErrors, setProjectErrors] = useState<FormErrors>({})
   const [orderFormMode, setOrderFormMode] = useState<'closed' | 'create' | 'edit'>('closed')
   const [editingOrderId, setEditingOrderId] = useState<number | null>(null)
   const [orderForm, setOrderForm] = useState<OrderFormState>(emptyOrderForm)
+  const [orderErrors, setOrderErrors] = useState<FormErrors>({})
   const [closureFormOpen, setClosureFormOpen] = useState(false)
   const [closureForm, setClosureForm] = useState<ClosureFormState>(emptyClosureForm)
+  const [closureErrors, setClosureErrors] = useState<FormErrors>({})
+  const [approvalProject, setApprovalProject] = useState<ProyectoObra | null>(null)
 
+  const rol = session?.role ?? 'PERSONAL_OBRAS'
+  const accessToken = session?.accessToken
   const permisos = permisosPorRol[rol]
 
   const crews = useMemo(() => resources.data?.crews ?? [], [resources.data?.crews])
@@ -157,6 +174,11 @@ function App() {
 
   const totalPaginas = Math.max(1, orders.data?.totalPages ?? 1)
   const busy = actionPending !== null
+  const pendingClosuresByOrder = useMemo(() => new Set(
+    (closures.data?.content ?? [])
+      .filter((closure) => !isClosureAuthorized(closure.status))
+      .map((closure) => closure.workOrderId),
+  ), [closures.data?.content])
 
   const loadDashboard = useCallback(async () => {
     setDashboard({ status: 'loading' })
@@ -187,6 +209,7 @@ function App() {
         data: await obrasApi.listWorkOrders({
           search: busqueda,
           status: estadoOrden === 'TODOS' ? undefined : estadoOrden,
+          origin: origenOrden === 'TODOS' ? undefined : origenOrden,
           page: pagina - 1,
           size: ORDER_PAGE_SIZE,
           sort: 'id,asc',
@@ -195,7 +218,7 @@ function App() {
     } catch (error) {
       setOrders({ status: 'error', message: getErrorMessage(error) })
     }
-  }, [busqueda, estadoOrden, pagina])
+  }, [busqueda, estadoOrden, origenOrden, pagina])
 
   const loadResources = useCallback(async () => {
     setResources({ status: 'loading' })
@@ -238,6 +261,25 @@ function App() {
     void loadOrders()
   }, [loadOrders])
 
+  useEffect(() => {
+    const onUnauthorized = () => {
+      window.sessionStorage.removeItem('obras-publicas-session')
+      window.sessionStorage.removeItem('obras-publicas-access-token')
+      setSession(null)
+    }
+    window.addEventListener('obras-api-unauthorized', onUnauthorized)
+    return () => window.removeEventListener('obras-api-unauthorized', onUnauthorized)
+  }, [])
+
+  useEffect(() => {
+    if (!accessToken) return
+    void obrasApi.me().then(({ username, role }) => {
+      setSession((current) => current ? { ...current, name: username, role } : current)
+    }).catch(() => {
+      // A 401 already clears local session through the shared API handler.
+    })
+  }, [accessToken])
+
   async function refreshCoreData() {
     await Promise.all([loadDashboard(), loadProjects(), loadOrders()])
   }
@@ -249,8 +291,10 @@ function App() {
       await action()
       await refreshCoreData()
       setFeedback({ type: 'success', message: successMessage })
+      return true
     } catch (error) {
       setFeedback({ type: 'error', message: getErrorMessage(error) })
+      return false
     } finally {
       setActionPending(null)
     }
@@ -259,66 +303,103 @@ function App() {
   function openCreateProjectForm() {
     setEditingProjectId(null)
     setProjectForm(emptyProjectForm())
+    setProjectErrors({})
     setProjectFormMode('create')
   }
 
   function openEditProjectForm(project: ProyectoObra) {
     setEditingProjectId(project.id)
     setProjectForm(projectToForm(project))
+    setProjectErrors({})
     setProjectFormMode('edit')
   }
 
   async function handleProjectSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
+    const errors = validateProject(projectForm)
+    setProjectErrors(errors)
+    if (hasErrors(errors)) {
+      setFeedback({ type: 'error', message: 'Revisá los campos obligatorios del proyecto.' })
+      return
+    }
+
     const payload = buildProjectPayload(projectForm)
-    await runAction(
+    const succeeded = await runAction(
       'project-form',
       projectFormMode === 'edit' ? 'Proyecto actualizado.' : 'Proyecto creado.',
       () => editingProjectId ? obrasApi.updateProject(editingProjectId, payload) : obrasApi.createProject(payload),
     )
+    if (!succeeded) {
+      return
+    }
     setProjectFormMode('closed')
     setEditingProjectId(null)
     setProjectForm(emptyProjectForm())
+    setProjectErrors({})
   }
 
   function openCreateOrderForm() {
     setEditingOrderId(null)
     setOrderForm(emptyOrderForm())
+    setOrderErrors({})
     setOrderFormMode('create')
   }
 
   function openEditOrderForm(order: OrdenTrabajo) {
     setEditingOrderId(order.id)
     setOrderForm(orderToForm(order))
+    setOrderErrors({})
     setOrderFormMode('edit')
   }
 
   async function handleOrderSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
+    const errors = validateWorkOrder(orderForm)
+    setOrderErrors(errors)
+    if (hasErrors(errors)) {
+      setFeedback({ type: 'error', message: 'Revisá los campos obligatorios de la orden.' })
+      return
+    }
+
     const payload = buildOrderPayload(orderForm)
-    await runAction(
+    const succeeded = await runAction(
       'order-form',
       orderFormMode === 'edit' ? 'Orden actualizada.' : 'Orden creada.',
       () => editingOrderId ? obrasApi.updateWorkOrder(editingOrderId, payload) : obrasApi.createWorkOrder(payload),
     )
+    if (!succeeded) {
+      return
+    }
     setOrderFormMode('closed')
     setEditingOrderId(null)
     setOrderForm(emptyOrderForm())
+    setOrderErrors({})
   }
 
   async function handleClosureSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
-    await runAction(
+    const errors = validateStreetClosure(closureForm)
+    setClosureErrors(errors)
+    if (hasErrors(errors)) {
+      setFeedback({ type: 'error', message: 'Revisá los datos de la solicitud de corte.' })
+      return
+    }
+
+    const succeeded = await runAction(
       'closure-form',
       'Solicitud de corte creada.',
       () => obrasApi.createStreetClosure(buildClosurePayload(closureForm)),
     )
+    if (!succeeded) {
+      return
+    }
     await loadClosures()
     setClosureFormOpen(false)
     setClosureForm(emptyClosureForm())
+    setClosureErrors({})
   }
 
   async function loadProjectDetail(id: number) {
@@ -345,15 +426,16 @@ function App() {
       return
     }
 
-    const crew = window.prompt('Cuadrilla existente. Dejar vacio conserva o deja sin asignar.', order.crew ?? '')
-    if (crew === null) {
+    const crew = window.prompt('Cuadrilla existente (obligatoria).', order.crew ?? '')
+    if (crew === null || !crew.trim()) {
+      setFeedback({ type: 'error', message: 'No se puede programar ni iniciar una orden sin cuadrilla.' })
       return
     }
 
     await runAction(`schedule-${order.id}`, 'Orden programada.', () =>
       obrasApi.scheduleWorkOrder(order.id, {
         scheduledDate,
-        ...(crew.trim() ? { crew: crew.trim() } : {}),
+        crew: crew.trim(),
       }),
     )
   }
@@ -361,6 +443,11 @@ function App() {
   async function handleCompleteOrder(order: OrdenTrabajo) {
     const outcome = window.prompt('Resultado de la orden', order.outcome ?? '')
     if (outcome === null) {
+      return
+    }
+
+    if (!outcome.trim()) {
+      setFeedback({ type: 'error', message: 'El resultado de la orden es obligatorio para completarla.' })
       return
     }
 
@@ -386,12 +473,48 @@ function App() {
       return
     }
 
+    if (normalizedDecision === 'REABRIR' && !observations.trim()) {
+      setFeedback({ type: 'error', message: 'El motivo es obligatorio para reabrir una orden.' })
+      return
+    }
+
     await runAction(`validate-${order.id}`, 'Orden validada.', () =>
       obrasApi.validateWorkOrder(order.id, {
         approved: normalizedDecision === 'APROBAR',
         ...(optionalText(observations) ? { observations: observations.trim() } : {}),
       }),
     )
+  }
+
+  async function handleApproveProject(project: ProyectoObra, payload: ProjectApprovalPayload) {
+    const succeeded = await runAction(`approve-project-${project.id}`, 'Proyecto aprobado.', () => obrasApi.approveProject(project.id, payload))
+    if (succeeded) {
+      setApprovalProject(null)
+    }
+  }
+
+  function handleLogin(nextSession: AuthSession) {
+    window.sessionStorage.setItem('obras-publicas-session', JSON.stringify(nextSession))
+    window.sessionStorage.setItem('obras-publicas-access-token', nextSession.accessToken)
+    setSession(nextSession)
+  }
+
+  async function handleLogout() {
+    try {
+      await obrasApi.logout()
+    } catch (error) {
+      if (!(error instanceof ApiError) || error.status !== 401) {
+        setFeedback({ type: 'error', message: getErrorMessage(error) })
+        return
+      }
+    }
+    window.sessionStorage.removeItem('obras-publicas-session')
+    window.sessionStorage.removeItem('obras-publicas-access-token')
+    setSession(null)
+  }
+
+  if (!session) {
+    return <LoginScreen onLogin={handleLogin} />
   }
 
   return (
@@ -438,17 +561,14 @@ function App() {
           </div>
           <div className="topbar-actions">
             <span className="env-pill">{env.appEnv} - {env.apiBaseUrl}</span>
-            <label className="role-picker">
-              Rol
-              <select value={rol} onChange={(event) => setRol(event.target.value as Rol)}>
-                <option value="PERSONAL_OBRAS">Personal Obras Publicas</option>
-                <option value="INGENIERO_ARQUITECTO">Ingeniero o Arquitecto</option>
-                <option value="RESPONSABLE_AUTORIZADO">Responsable autorizado</option>
-                <option value="JEFE_CUADRILLA">Jefe cuadrilla</option>
-                <option value="OPERARIO_CONTRATISTA">Operario o contratista</option>
-                <option value="INSPECTOR_OBRA">Inspector de obra</option>
-              </select>
-            </label>
+            <div className="session-summary">
+              <strong>{session.name}</strong>
+              <span>{roleLabel(rol)}</span>
+            </div>
+            <button type="button" className="logout-button" onClick={handleLogout}>
+              <LogOut size={16} aria-hidden="true" />
+              Salir
+            </button>
           </div>
         </header>
 
@@ -541,10 +661,12 @@ function App() {
             {projectFormMode !== 'closed' && (
               <ProjectForm
                 disabled={busy}
+                errors={projectErrors}
                 mode={projectFormMode}
                 onCancel={() => {
                   setProjectFormMode('closed')
                   setEditingProjectId(null)
+                  setProjectErrors({})
                 }}
                 onChange={(field, value) => setProjectForm((current) => ({ ...current, [field]: value }))}
                 onSubmit={handleProjectSubmit}
@@ -569,8 +691,9 @@ function App() {
                       <span>Estimado {formatMoney(project.estimatedBudget)} - {project.estimatedDurationDays} dias</span>
                     </div>
                     <StatusBadge value={projectStatusLabels[project.status] ?? project.status} />
-                    <span>{project.physicalProgress}% fisico</span>
-                    <span>{project.budgetProgress}% presupuesto</span>
+                      <span>{project.physicalProgress}% fisico</span>
+                      <span>{project.budgetProgress}% presupuesto</span>
+                      {project.status === 'APROBADO' && <span>Aprobado: {formatMoney(project.approvedBudget ?? 0)} - {project.approvedDeadlineDays ?? 0} días</span>}
                     <div className="row-actions">
                       <button type="button" disabled={busy} onClick={() => void loadProjectDetail(project.id)}>
                         Detalle
@@ -594,9 +717,7 @@ function App() {
                       <button
                         type="button"
                         disabled={project.status !== 'PENDIENTE_APROBACION' || !permisos.includes('aprobarProyecto') || busy}
-                        onClick={() => void runAction(`approve-project-${project.id}`, 'Proyecto aprobado.', () =>
-                          obrasApi.approveProject(project.id),
-                        )}
+                        onClick={() => setApprovalProject(project)}
                       >
                         <CheckCircle2 size={16} aria-hidden="true" />
                         Aprobar
@@ -617,6 +738,14 @@ function App() {
             )}
 
             {projectDetail && <ProjectDetail state={projectDetail} />}
+            {approvalProject && (
+              <ProjectApprovalForm
+                disabled={busy}
+                project={approvalProject}
+                onCancel={() => setApprovalProject(null)}
+                onSubmit={(payload) => void handleApproveProject(approvalProject, payload)}
+              />
+            )}
           </section>
         )}
 
@@ -636,11 +765,14 @@ function App() {
             {orderFormMode !== 'closed' && (
               <OrderForm
                 crewNames={crewNames}
+                projects={projects.data?.content ?? []}
                 disabled={busy}
+                errors={orderErrors}
                 mode={orderFormMode}
                 onCancel={() => {
                   setOrderFormMode('closed')
                   setEditingOrderId(null)
+                  setOrderErrors({})
                 }}
                 onChange={(field, value) => setOrderForm((current) => ({ ...current, [field]: value }))}
                 onSubmit={handleOrderSubmit}
@@ -672,6 +804,18 @@ function App() {
                   <option key={status} value={status}>{workOrderStatusLabels[status]}</option>
                 ))}
               </select>
+              <select
+                value={origenOrden}
+                onChange={(event) => {
+                  setOrigenOrden(event.target.value as 'TODOS' | WorkOrderOrigin)
+                  setPagina(1)
+                }}
+              >
+                <option value="TODOS">Todos los orígenes</option>
+                {Object.entries(originLabels).map(([origin, label]) => (
+                  <option key={origin} value={origin}>{label}</option>
+                ))}
+              </select>
             </div>
 
             {orders.status === 'loading' && <StateMessage type="loading" message="Cargando ordenes desde backend..." />}
@@ -689,6 +833,7 @@ function App() {
                       <strong>OT #{order.id} - {order.description}</strong>
                       <span>{textOrEmpty(order.location)} - {textOrEmpty(order.interventionType)} - {order.scheduledDate ?? 'Sin fecha'}</span>
                       <span>{originLabels[order.origin]} - {order.sourceRequestId ?? 'Sin origen externo'} - {order.estimatedDurationHours ?? 0} h estimadas</span>
+                      {order.projectId && <span>Proyecto asociado: #{order.projectId}</span>}
                     </div>
                     <PriorityBadge value={order.priority} />
                     <StatusBadge value={workOrderStatusLabels[order.status]} />
@@ -714,7 +859,7 @@ function App() {
                         type="button"
                         aria-label="Iniciar orden"
                         title="Iniciar"
-                        disabled={!permisos.includes('iniciarOrden') || !canStartOrder(order.status) || busy}
+                        disabled={!permisos.includes('iniciarOrden') || !canStartOrder(order.status, order.crew) || pendingClosuresByOrder.has(order.id) || busy}
                         onClick={() => void runAction(`start-order-${order.id}`, 'Orden iniciada.', () =>
                           obrasApi.startWorkOrder(order.id),
                         )}
@@ -814,7 +959,11 @@ function App() {
             {closureFormOpen && (
               <ClosureForm
                 disabled={busy}
-                onCancel={() => setClosureFormOpen(false)}
+                errors={closureErrors}
+                onCancel={() => {
+                  setClosureFormOpen(false)
+                  setClosureErrors({})
+                }}
                 onChange={(field, value) => setClosureForm((current) => ({ ...current, [field]: value }))}
                 onSubmit={handleClosureSubmit}
                 value={closureForm}
@@ -907,6 +1056,118 @@ const workOrderStatusOptions: WorkOrderStatus[] = [
   'REABIERTA',
 ]
 
+function LoginScreen({ onLogin }: { onLogin: (session: AuthSession) => void }) {
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [pending, setPending] = useState(false)
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!username.trim() || !password) {
+      setError('Ingresá usuario y contraseña.')
+      return
+    }
+    setPending(true)
+    setError('')
+    try {
+      const login = await obrasApi.login(username.trim(), password)
+      onLogin({ name: login.username, role: login.role, accessToken: login.accessToken })
+    } catch (loginError) {
+      setError(getErrorMessage(loginError))
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <main className="login-page">
+      <form className="login-card" noValidate onSubmit={submit}>
+        <Construction aria-hidden="true" />
+        <p className="eyebrow">Municipalidad UADE</p>
+        <h1>Obras Públicas</h1>
+        <p>Ingresá con las credenciales asignadas para operar el módulo.</p>
+        <label>
+          Nombre de usuario
+          <input autoComplete="username" autoFocus value={username} onChange={(event) => setUsername(event.target.value)} />
+        </label>
+        <label>
+          Contraseña
+          <input autoComplete="current-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
+        </label>
+        {error && <p className="field-error" role="alert">{error}</p>}
+        <button type="submit" disabled={pending}>{pending ? 'Ingresando...' : 'Ingresar'}</button>
+        <small>El rol se obtiene del token emitido por el backend.</small>
+      </form>
+    </main>
+  )
+}
+
+function ProjectApprovalForm({
+  disabled,
+  project,
+  onCancel,
+  onSubmit,
+}: {
+  disabled: boolean
+  project: ProyectoObra
+  onCancel: () => void
+  onSubmit: (payload: ProjectApprovalPayload) => void
+}) {
+  const [approvedBudget, setApprovedBudget] = useState(String(project.approvedBudget ?? project.estimatedBudget))
+  const [approvedDeadlineDays, setApprovedDeadlineDays] = useState(String(project.approvedDeadlineDays ?? project.estimatedDurationDays))
+  const [approvedAt, setApprovedAt] = useState(new Date().toISOString().slice(0, 10))
+  const [observations, setObservations] = useState('')
+  const [error, setError] = useState('')
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const errors = validateProjectApproval({ approvedBudget, approvedDeadlineDays, approvedAt, observations })
+    if (hasErrors(errors)) {
+      setError(Object.values(errors)[0])
+      return
+    }
+    onSubmit({
+      approvedBudget: Number(approvedBudget),
+      approvedDeadlineDays: Number(approvedDeadlineDays),
+      approvedAt,
+      ...(optionalText(observations) ? { observations: observations.trim() } : {}),
+    })
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <form className="approval-modal" aria-modal="true" noValidate onSubmit={submit} role="dialog" aria-labelledby="approval-title">
+        <div className="form-heading">
+          <div>
+            <h2 id="approval-title">Aprobar proyecto</h2>
+            <p>{project.name}</p>
+          </div>
+          <button type="button" disabled={disabled} onClick={onCancel}>Cancelar</button>
+        </div>
+        <label>
+          Presupuesto aprobado
+          <input min="0.01" required step="0.01" type="number" value={approvedBudget} onChange={(event) => setApprovedBudget(event.target.value)} />
+        </label>
+        <label>
+          Plazo aprobado (días)
+          <input min="1" required type="number" value={approvedDeadlineDays} onChange={(event) => setApprovedDeadlineDays(event.target.value)} />
+        </label>
+        <label>
+          Fecha de aprobación
+          <input required type="date" value={approvedAt} onChange={(event) => setApprovedAt(event.target.value)} />
+        </label>
+        <label>
+          Observaciones
+          <textarea maxLength={1000} value={observations} onChange={(event) => setObservations(event.target.value)} />
+        </label>
+        {error && <p className="field-error" role="alert">{error}</p>}
+        <button type="submit" disabled={disabled}>{disabled ? 'Aprobando...' : 'Confirmar aprobación'}</button>
+      </form>
+    </div>
+  )
+}
+
 function MetricCard({ icon: Icon, label, value, trend }: { icon: typeof BarChart3; label: string; value: string; trend: string }) {
   return (
     <article className="metric-card">
@@ -985,6 +1246,14 @@ function ProjectDetail({ state }: { state: RemoteState<ProyectoObra> }) {
         <dd>{textOrEmpty(state.data.contractor)}</dd>
         <dt>Estado</dt>
         <dd>{projectStatusLabels[state.data.status] ?? state.data.status}</dd>
+        <dt>Presupuesto aprobado</dt>
+        <dd>{state.data.approvedBudget ? formatMoney(state.data.approvedBudget) : 'Sin aprobar'}</dd>
+        <dt>Plazo aprobado</dt>
+        <dd>{state.data.approvedDeadlineDays ? `${state.data.approvedDeadlineDays} días` : 'Sin aprobar'}</dd>
+        <dt>Fecha de aprobación</dt>
+        <dd>{state.data.approvedAt ?? 'Sin aprobar'}</dd>
+        <dt>Observaciones de aprobación</dt>
+        <dd>{textOrEmpty(state.data.approvalObservations)}</dd>
       </dl>
     </section>
   )
@@ -1011,6 +1280,8 @@ function OrderDetail({ state }: { state: RemoteState<OrdenTrabajo> }) {
         <dd>{state.data.description}</dd>
         <dt>Origen</dt>
         <dd>{originLabels[state.data.origin]}</dd>
+        <dt>Proyecto asociado</dt>
+        <dd>{state.data.projectId ? `Proyecto #${state.data.projectId}` : 'No asociado'}</dd>
         <dt>Ubicacion</dt>
         <dd>{textOrEmpty(state.data.location)}</dd>
         <dt>Estado</dt>
@@ -1024,6 +1295,7 @@ function OrderDetail({ state }: { state: RemoteState<OrdenTrabajo> }) {
 
 function ProjectForm({
   disabled,
+  errors,
   mode,
   onCancel,
   onChange,
@@ -1031,6 +1303,7 @@ function ProjectForm({
   value,
 }: {
   disabled: boolean
+  errors: FormErrors
   mode: 'create' | 'edit'
   onCancel: () => void
   onChange: (field: keyof ProjectFormState, value: string) => void
@@ -1038,7 +1311,7 @@ function ProjectForm({
   value: ProjectFormState
 }) {
   return (
-    <form className="inline-form" onSubmit={onSubmit}>
+    <form className="inline-form" noValidate onSubmit={onSubmit}>
       <div className="form-heading">
         <h2>{mode === 'edit' ? 'Editar proyecto' : 'Crear proyecto'}</h2>
         <button type="button" onClick={onCancel} disabled={disabled}>Cancelar</button>
@@ -1046,39 +1319,37 @@ function ProjectForm({
       <div className="form-grid">
         <label>
           Nombre
-          <input required value={value.name} onChange={(event) => onChange('name', event.target.value)} />
+          <input aria-invalid={Boolean(errors.name)} required value={value.name} onChange={(event) => onChange('name', event.target.value)} />
+          {errors.name && <small className="field-error">{errors.name}</small>}
         </label>
         <label>
           Ubicacion
-          <input value={value.location} onChange={(event) => onChange('location', event.target.value)} />
+          <input aria-invalid={Boolean(errors.location)} required value={value.location} onChange={(event) => onChange('location', event.target.value)} />
+          {errors.location && <small className="field-error">{errors.location}</small>}
         </label>
         <label>
           Presupuesto estimado
           <input required min="1" type="number" value={value.estimatedBudget} onChange={(event) => onChange('estimatedBudget', event.target.value)} />
+          {errors.estimatedBudget && <small className="field-error">{errors.estimatedBudget}</small>}
         </label>
         <label>
           Fecha estimada
           <input required type="date" value={value.estimatedStartDate} onChange={(event) => onChange('estimatedStartDate', event.target.value)} />
+          {errors.estimatedStartDate && <small className="field-error">{errors.estimatedStartDate}</small>}
         </label>
         <label>
           Duracion dias
           <input required min="1" type="number" value={value.estimatedDurationDays} onChange={(event) => onChange('estimatedDurationDays', event.target.value)} />
+          {errors.estimatedDurationDays && <small className="field-error">{errors.estimatedDurationDays}</small>}
         </label>
         <label>
           Responsable tecnico
-          <input value={value.technicalManager} onChange={(event) => onChange('technicalManager', event.target.value)} />
-        </label>
-        <label>
-          Presupuesto aprobado
-          <input min="0" type="number" value={value.approvedBudget} onChange={(event) => onChange('approvedBudget', event.target.value)} />
+          <input aria-invalid={Boolean(errors.technicalManager)} required value={value.technicalManager} onChange={(event) => onChange('technicalManager', event.target.value)} />
+          {errors.technicalManager && <small className="field-error">{errors.technicalManager}</small>}
         </label>
         <label>
           Presupuesto usado
           <input min="0" type="number" value={value.usedBudget} onChange={(event) => onChange('usedBudget', event.target.value)} />
-        </label>
-        <label>
-          Plazo aprobado dias
-          <input min="1" type="number" value={value.approvedDeadlineDays} onChange={(event) => onChange('approvedDeadlineDays', event.target.value)} />
         </label>
         <label>
           Avance fisico
@@ -1090,7 +1361,8 @@ function ProjectForm({
         </label>
         <label className="wide-field">
           Alcance
-          <textarea value={value.scope} onChange={(event) => onChange('scope', event.target.value)} />
+          <textarea aria-invalid={Boolean(errors.scope)} required value={value.scope} onChange={(event) => onChange('scope', event.target.value)} />
+          {errors.scope && <small className="field-error">{errors.scope}</small>}
         </label>
         <label className="wide-field">
           Descripcion
@@ -1104,7 +1376,9 @@ function ProjectForm({
 
 function OrderForm({
   crewNames,
+  projects,
   disabled,
+  errors,
   mode,
   onCancel,
   onChange,
@@ -1112,7 +1386,9 @@ function OrderForm({
   value,
 }: {
   crewNames: string[]
+  projects: ProyectoObra[]
   disabled: boolean
+  errors: FormErrors
   mode: 'create' | 'edit'
   onCancel: () => void
   onChange: (field: keyof OrderFormState, value: string) => void
@@ -1120,7 +1396,7 @@ function OrderForm({
   value: OrderFormState
 }) {
   return (
-    <form className="inline-form" onSubmit={onSubmit}>
+    <form className="inline-form" noValidate onSubmit={onSubmit}>
       <div className="form-heading">
         <h2>{mode === 'edit' ? 'Editar orden' : 'Crear orden'}</h2>
         <button type="button" onClick={onCancel} disabled={disabled}>Cancelar</button>
@@ -1128,12 +1404,26 @@ function OrderForm({
       <div className="form-grid">
         <label>
           Origen
-          <select value={value.origin} onChange={(event) => onChange('origin', event.target.value)}>
+          <select value={value.origin} onChange={(event) => {
+            onChange('origin', event.target.value)
+            if (event.target.value !== 'PROYECTO') onChange('projectId', '')
+          }}>
             <option value="MANUAL">Manual</option>
             <option value="ATENCION_CIUDADANA">Atencion Ciudadana</option>
             <option value="INSPECCION">Inspeccion</option>
+            <option value="PROYECTO">Proyecto</option>
           </select>
         </label>
+        {value.origin === 'PROYECTO' && (
+          <label>
+            Proyecto asociado
+            <select required value={value.projectId} onChange={(event) => onChange('projectId', event.target.value)}>
+              <option value="">Seleccionar proyecto</option>
+              {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+            </select>
+            {errors.projectId && <small className="field-error">{errors.projectId}</small>}
+          </label>
+        )}
         <label>
           Prioridad
           <select value={value.priority} onChange={(event) => onChange('priority', event.target.value)}>
@@ -1145,25 +1435,30 @@ function OrderForm({
         <label>
           Source request ID
           <input value={value.sourceRequestId} onChange={(event) => onChange('sourceRequestId', event.target.value)} />
+          {errors.sourceRequestId && <small className="field-error">{errors.sourceRequestId}</small>}
         </label>
         <label>
           Tipo de intervencion
           <input value={value.interventionType} onChange={(event) => onChange('interventionType', event.target.value)} />
+          {errors.interventionType && <small className="field-error">{errors.interventionType}</small>}
         </label>
         <label>
           Ubicacion
           <input value={value.location} onChange={(event) => onChange('location', event.target.value)} />
+          {errors.location && <small className="field-error">{errors.location}</small>}
         </label>
         <label>
           Duracion horas
-          <input min="1" type="number" value={value.estimatedDurationHours} onChange={(event) => onChange('estimatedDurationHours', event.target.value)} />
+          <input required min="1" type="number" value={value.estimatedDurationHours} onChange={(event) => onChange('estimatedDurationHours', event.target.value)} />
+          {errors.estimatedDurationHours && <small className="field-error">{errors.estimatedDurationHours}</small>}
         </label>
         <label>
           Cuadrilla
           <select value={value.crew} onChange={(event) => onChange('crew', event.target.value)}>
-            <option value="">Sin cuadrilla</option>
+            <option value="">Seleccionar cuadrilla</option>
             {crewNames.map((crew) => <option key={crew} value={crew}>{crew}</option>)}
           </select>
+          {errors.crew && <small className="field-error">{errors.crew}</small>}
         </label>
         <label className="wide-field">
           Descripcion
@@ -1177,19 +1472,21 @@ function OrderForm({
 
 function ClosureForm({
   disabled,
+  errors,
   onCancel,
   onChange,
   onSubmit,
   value,
 }: {
   disabled: boolean
+  errors: FormErrors
   onCancel: () => void
   onChange: (field: keyof ClosureFormState, value: string) => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
   value: ClosureFormState
 }) {
   return (
-    <form className="inline-form" onSubmit={onSubmit}>
+    <form className="inline-form" noValidate onSubmit={onSubmit}>
       <div className="form-heading">
         <h2>Solicitar corte</h2>
         <button type="button" onClick={onCancel} disabled={disabled}>Cancelar</button>
@@ -1198,18 +1495,22 @@ function ClosureForm({
         <label>
           ID de orden
           <input required min="1" type="number" value={value.workOrderId} onChange={(event) => onChange('workOrderId', event.target.value)} />
+          {errors.workOrderId && <small className="field-error">{errors.workOrderId}</small>}
         </label>
         <label>
           Ubicacion
           <input required value={value.location} onChange={(event) => onChange('location', event.target.value)} />
+          {errors.location && <small className="field-error">{errors.location}</small>}
         </label>
         <label>
           Desde
           <input required type="date" value={value.requestedFrom} onChange={(event) => onChange('requestedFrom', event.target.value)} />
+          {errors.requestedFrom && <small className="field-error">{errors.requestedFrom}</small>}
         </label>
         <label>
           Hasta
           <input required type="date" value={value.requestedTo} onChange={(event) => onChange('requestedTo', event.target.value)} />
+          {errors.requestedTo && <small className="field-error">{errors.requestedTo}</small>}
         </label>
         <label className="wide-field">
           Tramos afectados
@@ -1219,10 +1520,12 @@ function ClosureForm({
             value={value.affectedSections}
             onChange={(event) => onChange('affectedSections', event.target.value)}
           />
+          {errors.affectedSections && <small className="field-error">{errors.affectedSections}</small>}
         </label>
         <label className="wide-field">
           Motivo
           <textarea required value={value.reason} onChange={(event) => onChange('reason', event.target.value)} />
+          {errors.reason && <small className="field-error">{errors.reason}</small>}
         </label>
       </div>
       <button type="submit" disabled={disabled}>Crear solicitud</button>
@@ -1260,6 +1563,7 @@ function emptyOrderForm(): OrderFormState {
   return {
     sourceRequestId: '',
     origin: 'MANUAL',
+    projectId: '',
     description: '',
     interventionType: '',
     location: '',
@@ -1302,6 +1606,7 @@ function orderToForm(order: OrdenTrabajo): OrderFormState {
   return {
     sourceRequestId: order.sourceRequestId ?? '',
     origin: order.origin,
+    projectId: order.projectId ? String(order.projectId) : '',
     description: order.description,
     interventionType: order.interventionType ?? '',
     location: order.location ?? '',
@@ -1318,11 +1623,9 @@ function buildProjectPayload(form: ProjectFormState): ProyectoObraPayload {
     ...(optionalText(form.scope) ? { scope: form.scope.trim() } : {}),
     ...(optionalText(form.location) ? { location: form.location.trim() } : {}),
     estimatedBudget: Number(form.estimatedBudget),
-    ...(optionalNumber(form.approvedBudget) !== undefined ? { approvedBudget: Number(form.approvedBudget) } : {}),
     ...(optionalNumber(form.usedBudget) !== undefined ? { usedBudget: Number(form.usedBudget) } : {}),
     estimatedStartDate: form.estimatedStartDate,
     estimatedDurationDays: Number(form.estimatedDurationDays),
-    ...(optionalNumber(form.approvedDeadlineDays) !== undefined ? { approvedDeadlineDays: Number(form.approvedDeadlineDays) } : {}),
     ...(optionalNumber(form.physicalProgress) !== undefined ? { physicalProgress: Number(form.physicalProgress) } : {}),
     ...(optionalText(form.technicalManager) ? { technicalManager: form.technicalManager.trim() } : {}),
     ...(optionalText(form.contractor) ? { contractor: form.contractor.trim() } : {}),
@@ -1333,6 +1636,7 @@ function buildOrderPayload(form: OrderFormState) {
   return {
     ...(optionalText(form.sourceRequestId) ? { sourceRequestId: form.sourceRequestId.trim() } : {}),
     origin: form.origin,
+    ...(form.origin === 'PROYECTO' ? { projectId: Number(form.projectId) } : { projectId: null }),
     description: form.description.trim(),
     ...(optionalText(form.interventionType) ? { interventionType: form.interventionType.trim() } : {}),
     ...(optionalText(form.location) ? { location: form.location.trim() } : {}),
@@ -1370,8 +1674,8 @@ function canScheduleOrder(status: WorkOrderStatus) {
   return status === 'PENDIENTE' || status === 'PROGRAMADA' || status === 'ASIGNADA'
 }
 
-function canStartOrder(status: WorkOrderStatus) {
-  return status === 'PROGRAMADA' || status === 'ASIGNADA' || status === 'PAUSADA' || status === 'REABIERTA'
+function canStartOrder(status: WorkOrderStatus, crew?: string | null) {
+  return Boolean(crew?.trim()) && (status === 'PROGRAMADA' || status === 'ASIGNADA' || status === 'PAUSADA' || status === 'REABIERTA')
 }
 
 function canCompleteOrder(status: WorkOrderStatus) {
@@ -1386,6 +1690,10 @@ function formatBackendLabel(value: string) {
     .join(' ')
 }
 
+function isClosureAuthorized(status: string) {
+  return status === 'AUTORIZADO' || status === 'AUTHORIZED'
+}
+
 function getErrorMessage(error: unknown) {
   if (error instanceof ApiError) {
     const details = error.details?.length ? ` (${error.details.join(', ')})` : ''
@@ -1397,6 +1705,28 @@ function getErrorMessage(error: unknown) {
   }
 
   return 'Ocurrio un error inesperado.'
+}
+
+function restoreSession(): AuthSession | null {
+  try {
+    const raw = window.sessionStorage.getItem('obras-publicas-session')
+    if (!raw) return null
+    const session = JSON.parse(raw) as AuthSession
+    return session.name && session.accessToken && permisosPorRol[session.role] ? session : null
+  } catch {
+    return null
+  }
+}
+
+function roleLabel(role: Rol) {
+  return {
+    PERSONAL_OBRAS: 'Personal de Obras Públicas',
+    INGENIERO_ARQUITECTO: 'Ingeniero o Arquitecto',
+    RESPONSABLE_AUTORIZADO: 'Responsable autorizado',
+    JEFE_CUADRILLA: 'Jefe de cuadrilla',
+    OPERARIO_CONTRATISTA: 'Operario o contratista',
+    INSPECTOR_OBRA: 'Inspector de obra',
+  }[role]
 }
 
 export default App

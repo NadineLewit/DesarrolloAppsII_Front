@@ -29,7 +29,7 @@ export type WorkOrderStatus =
   | 'REABIERTA'
 
 export type WorkOrderPriority = 'BAJA' | 'MEDIA' | 'ALTA'
-export type WorkOrderOrigin = 'MANUAL' | 'ATENCION_CIUDADANA' | 'INSPECCION'
+export type WorkOrderOrigin = 'MANUAL' | 'ATENCION_CIUDADANA' | 'INSPECCION' | 'PROYECTO'
 
 export type EstadoObra = ProjectStatus
 export type EstadoOrden = WorkOrderStatus
@@ -51,6 +51,16 @@ export type ProyectoObra = {
   status: ProjectStatus
   technicalManager?: string | null
   contractor?: string | null
+  approvedAt?: string | null
+  approvalObservations?: string | null
+}
+
+export type ProjectApprovalPayload = { approvedBudget: number; approvedDeadlineDays: number; approvedAt: string; observations?: string }
+
+export type LoginResponse = {
+  accessToken: string
+  username: string
+  role: Rol
 }
 
 export type ProyectoObraPayload = {
@@ -73,6 +83,7 @@ export type OrdenTrabajo = {
   id: number
   sourceRequestId?: string | null
   origin: WorkOrderOrigin
+  projectId?: number | null
   description: string
   interventionType?: string | null
   location?: string | null
@@ -88,6 +99,7 @@ export type OrdenTrabajo = {
 export type OrdenTrabajoPayload = {
   sourceRequestId?: string
   origin: WorkOrderOrigin
+  projectId?: number | null
   description: string
   interventionType?: string
   location?: string

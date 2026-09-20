@@ -4,12 +4,15 @@ import type {
   CorteCalle,
   CorteCallePayload,
   DashboardSummary,
+  LoginResponse,
   OrdenTrabajo,
   OrdenTrabajoPayload,
   PageResponse,
   ProjectStatus,
   ProyectoObra,
   ProyectoObraPayload,
+  ProjectApprovalPayload,
+  Rol,
   ResourcesSummary,
   ScheduleOTPayload,
   ValidateOTPayload,
@@ -76,6 +79,11 @@ async function request<T>(path: string, options: RequestOptions = {}) {
     headers.set('Content-Type', 'application/json')
   }
 
+  const accessToken = window.sessionStorage.getItem('obras-publicas-access-token')
+  if (accessToken && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${accessToken}`)
+  }
+
   const response = await fetch(buildUrl(path, options.params), {
     ...options,
     headers,
@@ -95,12 +103,20 @@ async function request<T>(path: string, options: RequestOptions = {}) {
       }
     }
 
-    throw new ApiError(
+    const error = new ApiError(
       errorBody.message ?? `Error ${response.status} al comunicarse con la API`,
       response.status,
       errorBody.code,
       errorBody.details,
     )
+    if (response.status === 401) {
+      window.dispatchEvent(new CustomEvent('obras-api-unauthorized'))
+    }
+    throw error
+  }
+
+  if (response.status === 204) {
+    return undefined as T
   }
 
   if (!contentType.includes('application/json')) {
@@ -138,6 +154,15 @@ export type ListStreetClosuresParams = {
 }
 
 export const obrasApi = {
+  login(username: string, password: string) {
+    return request<LoginResponse>('/auth/login', { method: 'POST', body: { username, password } })
+  },
+  me() {
+    return request<{ username: string; role: Rol }>('/auth/me')
+  },
+  logout() {
+    return request<void>('/auth/logout', { method: 'POST' })
+  },
   listProjects(params: ListProjectsParams = {}) {
     return request<PageResponse<ProyectoObra>>('/public-works/projects', { params })
   },
@@ -153,8 +178,8 @@ export const obrasApi = {
   submitProjectForApproval(id: number) {
     return request<ProyectoObra>(`/public-works/projects/${id}/submit-approval`, { method: 'PATCH' })
   },
-  approveProject(id: number) {
-    return request<ProyectoObra>(`/public-works/projects/${id}/approve`, { method: 'PATCH' })
+  approveProject(id: number, body: ProjectApprovalPayload) {
+    return request<ProyectoObra>(`/public-works/projects/${id}/approve`, { method: 'PATCH', body })
   },
   rejectProject(id: number) {
     return request<ProyectoObra>(`/public-works/projects/${id}/reject`, { method: 'PATCH' })
