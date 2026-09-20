@@ -12,6 +12,7 @@ import type {
   ProyectoObra,
   ProyectoObraPayload,
   ProjectApprovalPayload,
+  Rol,
   ResourcesSummary,
   ScheduleOTPayload,
   ValidateOTPayload,
@@ -102,12 +103,20 @@ async function request<T>(path: string, options: RequestOptions = {}) {
       }
     }
 
-    throw new ApiError(
+    const error = new ApiError(
       errorBody.message ?? `Error ${response.status} al comunicarse con la API`,
       response.status,
       errorBody.code,
       errorBody.details,
     )
+    if (response.status === 401) {
+      window.dispatchEvent(new CustomEvent('obras-api-unauthorized'))
+    }
+    throw error
+  }
+
+  if (response.status === 204) {
+    return undefined as T
   }
 
   if (!contentType.includes('application/json')) {
@@ -147,6 +156,12 @@ export type ListStreetClosuresParams = {
 export const obrasApi = {
   login(username: string, password: string) {
     return request<LoginResponse>('/auth/login', { method: 'POST', body: { username, password } })
+  },
+  me() {
+    return request<{ username: string; role: Rol }>('/auth/me')
+  },
+  logout() {
+    return request<void>('/auth/logout', { method: 'POST' })
   },
   listProjects(params: ListProjectsParams = {}) {
     return request<PageResponse<ProyectoObra>>('/public-works/projects', { params })

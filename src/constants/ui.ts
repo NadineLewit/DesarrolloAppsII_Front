@@ -2,7 +2,7 @@ import type { ProjectStatus, Rol, WorkOrderOrigin, WorkOrderStatus } from '../ty
 
 export const permisosPorRol: Record<Rol, string[]> = {
   PERSONAL_OBRAS: ['crearProyecto', 'modificarProyecto', 'crearOrden', 'solicitarCorte', 'verIndicadores'],
-  INGENIERO_ARQUITECTO: ['planificar', 'registrarAvances', 'tramitarAmpliaciones', 'verIndicadores'],
+  INGENIERO_ARQUITECTO: ['verIndicadores'],
   RESPONSABLE_AUTORIZADO: ['aprobarProyecto', 'rechazarProyecto', 'suspenderObra', 'reanudarObra', 'cerrarProyecto'],
   JEFE_CUADRILLA: ['programarOrden', 'reprogramarOrden', 'iniciarOrden', 'pausarOrden'],
   OPERARIO_CONTRATISTA: ['finalizarOrden', 'cargarEvidencia'],
@@ -35,4 +35,5 @@ export const originLabels: Record<WorkOrderOrigin, string> = {
   MANUAL: 'Manual',
   ATENCION_CIUDADANA: 'Atencion Ciudadana',
   INSPECCION: 'Inspeccion',
+  PROYECTO: 'Proyecto',
 }

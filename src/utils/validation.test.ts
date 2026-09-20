@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { hasErrors, validateProject, validateStreetClosure, validateWorkOrder } from './validation'
+import { hasErrors, validateProject, validateProjectApproval, validateStreetClosure, validateWorkOrder } from './validation'
 
 describe('validaciones de formularios', () => {
   it('requiere los datos mínimos de un proyecto', () => {
@@ -9,7 +9,7 @@ describe('validaciones de formularios', () => {
   })
 
   it('exige cuadrilla y correlación para una orden externa', () => {
-    const errors = validateWorkOrder({ origin: 'ATENCION_CIUDADANA', sourceRequestId: '', description: 'Bache', interventionType: 'Reparación', location: 'Lima 100', estimatedDurationHours: '2', crew: '' })
+    const errors = validateWorkOrder({ origin: 'ATENCION_CIUDADANA', projectId: '', sourceRequestId: '', description: 'Bache', interventionType: 'Reparación', location: 'Lima 100', estimatedDurationHours: '2', crew: '' })
     expect(errors).toMatchObject({ sourceRequestId: expect.any(String), crew: expect.any(String) })
   })
 
@@ -25,9 +25,22 @@ describe('validaciones de formularios', () => {
     }))).toBe(false)
     expect(hasErrors(validateWorkOrder({
       origin: 'MANUAL', sourceRequestId: '', description: 'Reparar bache', interventionType: 'Bacheo', location: 'Av. Lima 100', estimatedDurationHours: '4', crew: 'Cuadrilla Norte',
+      projectId: '',
     }))).toBe(false)
     expect(hasErrors(validateStreetClosure({
       workOrderId: '1', location: 'Av. Lima', affectedSections: '100-200', requestedFrom: '2026-09-22', requestedTo: '2026-09-22', reason: 'Obra',
     }))).toBe(false)
+  })
+
+  it('requiere proyecto solo para órdenes con origen PROYECTO', () => {
+    expect(validateWorkOrder({ origin: 'PROYECTO', projectId: '', sourceRequestId: '', description: 'Reparación', interventionType: '', location: '', estimatedDurationHours: '6', crew: '' }).projectId).toBeTruthy()
+    expect(hasErrors(validateWorkOrder({ origin: 'PROYECTO', projectId: '1', sourceRequestId: '', description: 'Reparación', interventionType: '', location: '', estimatedDurationHours: '6', crew: '' }))).toBe(false)
+  })
+
+  it('valida los límites de una aprobación', () => {
+    expect(hasErrors(validateProjectApproval({ approvedBudget: '100000.50', approvedDeadlineDays: '90', approvedAt: '2026-09-22', observations: '' }))).toBe(false)
+    expect(validateProjectApproval({ approvedBudget: '0', approvedDeadlineDays: '2.5', approvedAt: '22/09/2026', observations: 'x'.repeat(1001) })).toMatchObject({
+      approvedBudget: expect.any(String), approvedDeadlineDays: expect.any(String), approvedAt: expect.any(String), observations: expect.any(String),
+    })
   })
 })
