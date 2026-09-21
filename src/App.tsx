@@ -102,6 +102,12 @@ type ClosureFormState = {
   reason: string
 }
 
+type OrderActionKind = 'schedule' | 'complete' | 'validate'
+type OrderActionRequest =
+  | { kind: 'schedule'; scheduledDate: string; crew: string }
+  | { kind: 'complete'; outcome: string }
+  | { kind: 'validate'; approved: boolean; observations?: string }
+
 function App() {
   const [seccionActiva, setSeccionActiva] = useState<Seccion>('dashboard')
   const [session, setSession] = useState<AuthSession | null>(() => restoreSession())
@@ -130,6 +136,7 @@ function App() {
   const [closureForm, setClosureForm] = useState<ClosureFormState>(emptyClosureForm)
   const [closureErrors, setClosureErrors] = useState<FormErrors>({})
   const [approvalProject, setApprovalProject] = useState<ProyectoObra | null>(null)
+  const [orderAction, setOrderAction] = useState<{ kind: OrderActionKind; order: OrdenTrabajo } | null>(null)
 
   const rol = session?.role ?? 'PERSONAL_OBRAS'
   const accessToken = session?.accessToken
@@ -242,24 +249,29 @@ function App() {
   }, [])
 
   useEffect(() => {
+    if (!accessToken) return
     void loadDashboard()
-  }, [loadDashboard])
+  }, [accessToken, loadDashboard])
 
   useEffect(() => {
+    if (!accessToken) return
     void loadProjects()
-  }, [loadProjects])
+  }, [accessToken, loadProjects])
 
   useEffect(() => {
+    if (!accessToken) return
     void loadResources()
-  }, [loadResources])
+  }, [accessToken, loadResources])
 
   useEffect(() => {
+    if (!accessToken) return
     void loadClosures()
-  }, [loadClosures])
+  }, [accessToken, loadClosures])
 
   useEffect(() => {
+    if (!accessToken) return
     void loadOrders()
-  }, [loadOrders])
+  }, [accessToken, loadOrders])
 
   useEffect(() => {
     const onUnauthorized = () => {
@@ -290,6 +302,10 @@ function App() {
     try {
       await action()
       await refreshCoreData()
+      await Promise.all([
+        projectDetail?.status === 'success' && projectDetail.data ? loadProjectDetail(projectDetail.data.id) : Promise.resolve(),
+        orderDetail?.status === 'success' && orderDetail.data ? loadOrderDetail(orderDetail.data.id) : Promise.resolve(),
+      ])
       setFeedback({ type: 'success', message: successMessage })
       return true
     } catch (error) {
@@ -420,70 +436,18 @@ function App() {
     }
   }
 
-  async function handleScheduleOrder(order: OrdenTrabajo) {
-    const scheduledDate = window.prompt('Fecha programada (YYYY-MM-DD)', order.scheduledDate ?? '')
-    if (!scheduledDate) {
-      return
-    }
-
-    const crew = window.prompt('Cuadrilla existente (obligatoria).', order.crew ?? '')
-    if (crew === null || !crew.trim()) {
-      setFeedback({ type: 'error', message: 'No se puede programar ni iniciar una orden sin cuadrilla.' })
-      return
-    }
-
-    await runAction(`schedule-${order.id}`, 'Orden programada.', () =>
-      obrasApi.scheduleWorkOrder(order.id, {
-        scheduledDate,
-        crew: crew.trim(),
-      }),
-    )
-  }
-
-  async function handleCompleteOrder(order: OrdenTrabajo) {
-    const outcome = window.prompt('Resultado de la orden', order.outcome ?? '')
-    if (outcome === null) {
-      return
-    }
-
-    if (!outcome.trim()) {
-      setFeedback({ type: 'error', message: 'El resultado de la orden es obligatorio para completarla.' })
-      return
-    }
-
-    await runAction(`complete-${order.id}`, 'Orden completada.', () =>
-      obrasApi.completeWorkOrder(order.id, optionalText(outcome) ? { outcome: outcome.trim() } : {}),
-    )
-  }
-
-  async function handleValidateOrder(order: OrdenTrabajo) {
-    const decision = window.prompt('Escribi APROBAR para validar o REABRIR para devolver la orden', 'APROBAR')
-    if (decision === null) {
-      return
-    }
-
-    const normalizedDecision = decision.trim().toUpperCase()
-    if (normalizedDecision !== 'APROBAR' && normalizedDecision !== 'REABRIR') {
-      setFeedback({ type: 'error', message: 'La decision debe ser APROBAR o REABRIR.' })
-      return
-    }
-
-    const observations = window.prompt('Observaciones', '')
-    if (observations === null) {
-      return
-    }
-
-    if (normalizedDecision === 'REABRIR' && !observations.trim()) {
-      setFeedback({ type: 'error', message: 'El motivo es obligatorio para reabrir una orden.' })
-      return
-    }
-
-    await runAction(`validate-${order.id}`, 'Orden validada.', () =>
-      obrasApi.validateWorkOrder(order.id, {
-        approved: normalizedDecision === 'APROBAR',
-        ...(optionalText(observations) ? { observations: observations.trim() } : {}),
-      }),
-    )
+  async function handleOrderAction(request: OrderActionRequest) {
+    if (!orderAction) return
+    const { order } = orderAction
+    const succeeded = request.kind === 'schedule'
+      ? await runAction(`schedule-${order.id}`, 'Orden programada.', () =>
+        obrasApi.scheduleWorkOrder(order.id, { scheduledDate: request.scheduledDate, crew: request.crew }))
+      : request.kind === 'complete'
+        ? await runAction(`complete-${order.id}`, 'Orden completada.', () =>
+          obrasApi.completeWorkOrder(order.id, { outcome: request.outcome }))
+        : await runAction(`validate-${order.id}`, request.approved ? 'Orden validada.' : 'Orden reabierta.', () =>
+          obrasApi.validateWorkOrder(order.id, { approved: request.approved, observations: request.observations }))
+    if (succeeded) setOrderAction(null)
   }
 
   async function handleApproveProject(project: ProyectoObra, payload: ProjectApprovalPayload) {
@@ -496,6 +460,8 @@ function App() {
   function handleLogin(nextSession: AuthSession) {
     window.sessionStorage.setItem('obras-publicas-session', JSON.stringify(nextSession))
     window.sessionStorage.setItem('obras-publicas-access-token', nextSession.accessToken)
+    setProjectDetail(null)
+    setOrderDetail(null)
     setSession(nextSession)
   }
 
@@ -510,6 +476,9 @@ function App() {
     }
     window.sessionStorage.removeItem('obras-publicas-session')
     window.sessionStorage.removeItem('obras-publicas-access-token')
+    setProjectDetail(null)
+    setOrderDetail(null)
+    setOrderAction(null)
     setSession(null)
   }
 
@@ -584,7 +553,7 @@ function App() {
               <>
                 <MetricCard icon={Building2} label="Obras activas" value={dashboard.data.activeProjects.toString()} trend="desde backend" />
                 <MetricCard icon={ClipboardList} label="Ordenes abiertas" value={dashboard.data.openWorkOrders.toString()} trend="no completadas" />
-                <MetricCard icon={Network} label="Ordenes externas" value={dashboard.data.externalWorkOrders.toString()} trend="origen no manual" />
+                <MetricCard icon={Network} label="Ordenes de reclamo o inspeccion" value={dashboard.data.externalWorkOrders.toString()} trend="sin contar origen Proyecto" />
                 <MetricCard icon={AlertTriangle} label="Demoras detectadas" value={dashboard.data.delayedWorkOrders.toString()} trend="segun fecha programada" />
               </>
             )}
@@ -851,7 +820,7 @@ function App() {
                         aria-label="Programar orden"
                         title="Programar"
                         disabled={!permisos.includes('programarOrden') || !canScheduleOrder(order.status) || busy}
-                        onClick={() => void handleScheduleOrder(order)}
+                        onClick={() => setOrderAction({ kind: 'schedule', order })}
                       >
                         <Clock3 size={16} aria-hidden="true" />
                       </button>
@@ -882,7 +851,7 @@ function App() {
                         aria-label="Completar orden"
                         title="Completar"
                         disabled={!permisos.includes('finalizarOrden') || !canCompleteOrder(order.status) || busy}
-                        onClick={() => void handleCompleteOrder(order)}
+                        onClick={() => setOrderAction({ kind: 'complete', order })}
                       >
                         <CheckCircle2 size={16} aria-hidden="true" />
                       </button>
@@ -891,7 +860,7 @@ function App() {
                         aria-label="Validar orden"
                         title="Validar"
                         disabled={!permisos.includes('validarOrden') || order.status !== 'COMPLETADA' || busy}
-                        onClick={() => void handleValidateOrder(order)}
+                        onClick={() => setOrderAction({ kind: 'validate', order })}
                       >
                         <ShieldCheck size={16} aria-hidden="true" />
                       </button>
@@ -916,6 +885,16 @@ function App() {
             </footer>
 
             {orderDetail && <OrderDetail state={orderDetail} />}
+            {orderAction && (
+              <OrderActionForm
+                key={`${orderAction.kind}-${orderAction.order.id}`}
+                action={orderAction}
+                crewNames={crewNames}
+                disabled={busy}
+                onCancel={() => setOrderAction(null)}
+                onSubmit={(request) => void handleOrderAction(request)}
+              />
+            )}
           </section>
         )}
 
@@ -1100,6 +1079,105 @@ function LoginScreen({ onLogin }: { onLogin: (session: AuthSession) => void }) {
         <small>El rol se obtiene del token emitido por el backend.</small>
       </form>
     </main>
+  )
+}
+
+function OrderActionForm({
+  action,
+  crewNames,
+  disabled,
+  onCancel,
+  onSubmit,
+}: {
+  action: { kind: OrderActionKind; order: OrdenTrabajo }
+  crewNames: string[]
+  disabled: boolean
+  onCancel: () => void
+  onSubmit: (request: OrderActionRequest) => void
+}) {
+  const [scheduledDate, setScheduledDate] = useState(action.order.scheduledDate ?? '')
+  const [crew, setCrew] = useState(action.order.crew ?? '')
+  const [outcome, setOutcome] = useState(action.order.outcome ?? '')
+  const [approved, setApproved] = useState(true)
+  const [observations, setObservations] = useState('')
+  const [error, setError] = useState('')
+  const availableCrews = Array.from(new Set([...crewNames, ...(crew ? [crew] : [])])).sort()
+  const title = action.kind === 'schedule' ? 'Programar orden' : action.kind === 'complete' ? 'Completar orden' : 'Inspeccionar orden'
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (action.kind === 'schedule') {
+      if (!scheduledDate || !crew.trim()) {
+        setError('Indicá una fecha y seleccioná una cuadrilla.')
+        return
+      }
+      onSubmit({ kind: 'schedule', scheduledDate, crew: crew.trim() })
+    } else if (action.kind === 'complete') {
+      if (!outcome.trim()) {
+        setError('El resultado de la orden es obligatorio.')
+        return
+      }
+      onSubmit({ kind: 'complete', outcome: outcome.trim() })
+    } else {
+      if (!approved && !observations.trim()) {
+        setError('Explicá el motivo para reabrir la orden.')
+        return
+      }
+      onSubmit({ kind: 'validate', approved, ...(observations.trim() ? { observations: observations.trim() } : {}) })
+    }
+    setError('')
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <form className="approval-modal" aria-modal="true" noValidate onSubmit={submit} role="dialog" aria-labelledby="order-action-title">
+        <div className="form-heading">
+          <div>
+            <h2 id="order-action-title">{title}</h2>
+            <p>OT #{action.order.id} — {action.order.description}</p>
+          </div>
+          <button type="button" disabled={disabled} onClick={onCancel}>Cancelar</button>
+        </div>
+        {action.kind === 'schedule' && (
+          <>
+            <label>
+              Fecha programada
+              <input required type="date" value={scheduledDate} onChange={(event) => setScheduledDate(event.target.value)} />
+            </label>
+            <label>
+              Cuadrilla
+              <select required value={crew} onChange={(event) => setCrew(event.target.value)}>
+                <option value="">Seleccionar cuadrilla</option>
+                {availableCrews.map((name) => <option key={name} value={name}>{name}</option>)}
+              </select>
+            </label>
+          </>
+        )}
+        {action.kind === 'complete' && (
+          <label>
+            Resultado de la orden
+            <textarea required maxLength={1000} value={outcome} onChange={(event) => setOutcome(event.target.value)} />
+          </label>
+        )}
+        {action.kind === 'validate' && (
+          <>
+            <label>
+              Dictamen de inspección
+              <select value={approved ? 'APROBAR' : 'REABRIR'} onChange={(event) => setApproved(event.target.value === 'APROBAR')}>
+                <option value="APROBAR">Validar conformidad</option>
+                <option value="REABRIR">Rechazar y reabrir</option>
+              </select>
+            </label>
+            <label>
+              Observaciones {approved ? '(opcional)' : '(obligatorias)'}
+              <textarea required={!approved} maxLength={1000} value={observations} onChange={(event) => setObservations(event.target.value)} />
+            </label>
+          </>
+        )}
+        {error && <p className="field-error" role="alert">{error}</p>}
+        <button type="submit" disabled={disabled}>{disabled ? 'Guardando...' : action.kind === 'validate' ? (approved ? 'Validar orden' : 'Reabrir orden') : title}</button>
+      </form>
+    </div>
   )
 }
 

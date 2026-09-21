@@ -812,12 +812,11 @@ textarea[aria-invalid="true"] {
   }
 
   .nav-list {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-    overflow-x: auto;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .nav-list button {
-    min-width: 94px;
+    min-width: 0;
     justify-content: center;
   }
 
@@ -855,5 +854,11 @@ textarea[aria-invalid="true"] {
   .role-picker {
     max-width: none;
     width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .nav-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
