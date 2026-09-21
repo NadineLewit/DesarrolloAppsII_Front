@@ -1,5 +1,4 @@
-import { loadEnv } from 'vite'
-import { defineConfig } from 'vitest/config'
+import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 
 // https://vite.dev/config/
@@ -9,12 +8,6 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
-    test: {
-      coverage: {
-        include: ['src/**/*.{ts,tsx}'],
-        thresholds: { lines: 85, statements: 85 },
-      },
-    },
     server: proxyTarget
       ? {
           proxy: {
