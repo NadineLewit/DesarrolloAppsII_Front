@@ -81,6 +81,7 @@ export type ProyectoObraPayload = {
 
 export type OrdenTrabajo = {
   id: number
+  sourceModule?: string | null
   sourceRequestId?: string | null
   origin: WorkOrderOrigin
   projectId?: number | null
@@ -149,7 +150,7 @@ export type CorteCalle = {
   closureRequestId: string
   sourceModule: string
   workOrderId: number
-  location: string
+  location: StreetClosureLocation
   affectedSections: string[]
   status: string
   requestedFrom: string
@@ -157,13 +158,36 @@ export type CorteCalle = {
   reason: string
 }
 
+export type StreetClosureLocation = {
+  /** Dirección completa legible para las personas usuarias. */
+  street: string
+  /** Lo informa el módulo de origen cuando lo conoce. */
+  neighborhoodId?: string | number | null
+}
+
 export type CorteCallePayload = {
   workOrderId: number
-  location: string
+  location: StreetClosureLocation
   affectedSections: string[]
   requestedFrom: string
   requestedTo: string
   reason: string
+}
+
+/**
+ * Los valores de estado, nombres de evento y módulos pertenecen al contrato
+ * de integración del backend; no se fijan como enums en el cliente.
+ */
+export type IntegrationEvent = {
+  id: string | number
+  eventType?: string | null
+  sourceModule?: string | null
+  sourceRequestId?: string | null
+  status?: string | null
+  receivedAt?: string | null
+  processedAt?: string | null
+  error?: string | null
+  payload?: unknown
 }
 
 export type DashboardSummary = {

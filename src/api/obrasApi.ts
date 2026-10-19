@@ -4,6 +4,7 @@ import type {
   CorteCalle,
   CorteCallePayload,
   DashboardSummary,
+  IntegrationEvent,
   LoginResponse,
   OrdenTrabajo,
   OrdenTrabajoPayload,
@@ -153,6 +154,12 @@ export type ListStreetClosuresParams = {
   sort?: string
 }
 
+export type ListIntegrationEventsParams = {
+  page?: number
+  size?: number
+  sort?: string
+}
+
 export const obrasApi = {
   login(username: string, password: string) {
     return request<LoginResponse>('/auth/login', { method: 'POST', body: { username, password } })
@@ -222,5 +229,8 @@ export const obrasApi = {
   },
   createStreetClosure(body: CorteCallePayload) {
     return request<CorteCalle>('/public-works/street-closures', { method: 'POST', body })
+  },
+  listIntegrationEvents(params: ListIntegrationEventsParams = {}) {
+    return request<PageResponse<IntegrationEvent>>('/public-works/integration-events', { params })
   },
 }
