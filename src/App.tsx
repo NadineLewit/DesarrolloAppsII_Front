@@ -23,11 +23,11 @@ import type { FormEvent } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ApiError, obrasApi } from './api/obrasApi'
 import { env } from './config/env'
-import { eventosIntegracion, modulosIntegracion } from './contracts/integrations'
 import { originLabels, permisosPorRol, projectStatusLabels, workOrderStatusLabels } from './constants/ui'
 import type {
   CorteCalle,
   DashboardSummary,
+  IntegrationEvent,
   OrdenTrabajo,
   PageResponse,
   Prioridad,
@@ -95,7 +95,8 @@ type OrderFormState = {
 
 type ClosureFormState = {
   workOrderId: string
-  location: string
+  street: string
+  neighborhoodId: string
   affectedSections: string
   requestedFrom: string
   requestedTo: string
@@ -120,6 +121,7 @@ function App() {
   const [orders, setOrders] = useState<RemoteState<PageResponse<OrdenTrabajo>>>({ status: 'loading' })
   const [resources, setResources] = useState<RemoteState<ResourcesSummary>>({ status: 'loading' })
   const [closures, setClosures] = useState<RemoteState<PageResponse<CorteCalle>>>({ status: 'loading' })
+  const [integrationEvents, setIntegrationEvents] = useState<RemoteState<PageResponse<IntegrationEvent>>>({ status: 'loading' })
   const [projectDetail, setProjectDetail] = useState<RemoteState<ProyectoObra> | null>(null)
   const [orderDetail, setOrderDetail] = useState<RemoteState<OrdenTrabajo> | null>(null)
   const [feedback, setFeedback] = useState<Feedback | null>(null)
@@ -248,6 +250,18 @@ function App() {
     }
   }, [])
 
+  const loadIntegrationEvents = useCallback(async () => {
+    setIntegrationEvents({ status: 'loading' })
+    try {
+      setIntegrationEvents({
+        status: 'success',
+        data: await obrasApi.listIntegrationEvents({ page: 0, size: LIST_PAGE_SIZE, sort: 'receivedAt,desc' }),
+      })
+    } catch (error) {
+      setIntegrationEvents({ status: 'error', message: getErrorMessage(error) })
+    }
+  }, [])
+
   useEffect(() => {
     if (!accessToken) return
     void loadDashboard()
@@ -267,6 +281,11 @@ function App() {
     if (!accessToken) return
     void loadClosures()
   }, [accessToken, loadClosures])
+
+  useEffect(() => {
+    if (!accessToken) return
+    void loadIntegrationEvents()
+  }, [accessToken, loadIntegrationEvents])
 
   useEffect(() => {
     if (!accessToken) return
@@ -560,21 +579,6 @@ function App() {
 
             <section className="panel full">
               <div className="panel-heading">
-                <h2>Mapa de integraciones</h2>
-                <span className="loading-pill">Fuera de esta entrega</span>
-              </div>
-              <div className="module-grid">
-                {modulosIntegracion.map((modulo) => (
-                  <article key={modulo.id} className="module-card">
-                    <strong>{modulo.id} - {modulo.nombre}</strong>
-                    <span>{modulo.descripcion}</span>
-                  </article>
-                ))}
-              </div>
-            </section>
-
-            <section className="panel full">
-              <div className="panel-heading">
                 <h2>Ciclo de vida de obra publica</h2>
                 <span className="loading-pill">Contrato backend</span>
               </div>
@@ -602,16 +606,18 @@ function App() {
 
             <section className="panel">
               <div className="panel-heading">
-                <h2>Eventos clave</h2>
+                <h2>Solicitudes recibidas</h2>
                 <FileText size={18} aria-hidden="true" />
               </div>
               <ul className="event-list">
-                {eventosIntegracion.slice(0, 6).map((evento) => (
-                  <li key={evento.nombre}>
-                    <strong>{evento.nombre}</strong>
-                    <span>{evento.direccion} - {evento.modulos.join(', ')}</span>
+                {integrationEvents.data?.content.slice(0, 6).map((event) => (
+                  <li key={event.id}>
+                    <strong>{event.eventType ?? event.sourceRequestId ?? `Evento #${event.id}`}</strong>
+                    <span>{event.sourceModule ?? 'Módulo de origen no informado'} · {event.status ?? 'Estado no informado'}</span>
                   </li>
                 ))}
+                {integrationEvents.status === 'loading' && <li>Cargando solicitudes recibidas...</li>}
+                {integrationEvents.status === 'error' && <li>No se pudieron cargar las solicitudes recibidas.</li>}
               </ul>
             </section>
           </section>
@@ -801,7 +807,8 @@ function App() {
                     <div>
                       <strong>OT #{order.id} - {order.description}</strong>
                       <span>{textOrEmpty(order.location)} - {textOrEmpty(order.interventionType)} - {order.scheduledDate ?? 'Sin fecha'}</span>
-                      <span>{originLabels[order.origin]} - {order.sourceRequestId ?? 'Sin origen externo'} - {order.estimatedDurationHours ?? 0} h estimadas</span>
+                      <span>{originLabels[order.origin]} - {order.estimatedDurationHours ?? 0} h estimadas</span>
+                      {(order.sourceModule || order.sourceRequestId) && <span>Origen externo: {order.sourceModule ?? 'Módulo no informado'} · Solicitud: {order.sourceRequestId ?? 'Sin ID informado'}</span>}
                       {order.projectId && <span>Proyecto asociado: #{order.projectId}</span>}
                     </div>
                     <PriorityBadge value={order.priority} />
@@ -963,7 +970,8 @@ function App() {
                     <Clock3 size={18} aria-hidden="true" />
                     <div>
                       <strong>{closure.closureRequestId} - OT #{closure.workOrderId}</strong>
-                      <span>{closure.location}</span>
+                      <span>{closure.location.street}</span>
+                      {closure.location.neighborhoodId !== undefined && closure.location.neighborhoodId !== null && <span>Barrio: {closure.location.neighborhoodId}</span>}
                       <span>{closure.affectedSections.join(', ')}</span>
                     </div>
                     <span>{closure.requestedFrom} al {closure.requestedTo}</span>
@@ -980,25 +988,27 @@ function App() {
           <section className="panel">
             <div className="panel-heading stacked">
               <div>
-                <h2>Eventos e integraciones</h2>
-                <p>La integracion completa entre modulos queda fuera de esta primera entrega.</p>
+                <h2>Solicitudes recibidas</h2>
+                <p>Información provista por el backend. La recepción y publicación de eventos es responsabilidad del Back.</p>
               </div>
-              <span className="loading-pill">Bloqueado por backend externo</span>
+              <button type="button" onClick={() => void loadIntegrationEvents()} disabled={integrationEvents.status === 'loading'}>Actualizar</button>
             </div>
-            <div className="integration-table">
-              {eventosIntegracion.map((evento) => (
-                <article key={evento.nombre} className="integration-row">
-                  <div>
-                    <strong>{evento.nombre}</strong>
-                    {evento.nota && <small>{evento.nota}</small>}
-                  </div>
-                  <StatusBadge value={evento.direccion} />
-                  <span>{evento.modulos.join(', ')}</span>
-                  <p>{evento.descripcion}</p>
-                  <code>{evento.payload.join(', ')}</code>
-                </article>
-              ))}
-            </div>
+            {integrationEvents.status === 'loading' && <StateMessage type="loading" message="Cargando solicitudes recibidas..." />}
+            {integrationEvents.status === 'error' && <StateMessage type="error" message={integrationEvents.message ?? 'No se pudieron cargar los eventos de integración.'} onRetry={loadIntegrationEvents} />}
+            {integrationEvents.status === 'success' && integrationEvents.data?.content.length === 0 && <StateMessage type="empty" message="No hay solicitudes recibidas." />}
+            {integrationEvents.status === 'success' && integrationEvents.data && integrationEvents.data.content.length > 0 && (
+              <div className="integration-table">
+                {integrationEvents.data.content.map((event) => (
+                  <article key={event.id} className="integration-row">
+                    <div><strong>{event.eventType ?? `Evento #${event.id}`}</strong><small>ID: {event.id}</small></div>
+                    <StatusBadge value={event.status ?? 'Estado no informado'} />
+                    <span>{event.sourceModule ?? 'Módulo de origen no informado'}</span>
+                    <p>Solicitud: {event.sourceRequestId ?? 'No informada'}{event.receivedAt ? ` · Recibida: ${event.receivedAt}` : ''}</p>
+                    {event.error ? <code>{event.error}</code> : <code>{event.processedAt ? `Procesada: ${event.processedAt}` : 'Sin detalle adicional'}</code>}
+                  </article>
+                ))}
+              </div>
+            )}
           </section>
         )}
       </main>
@@ -1365,6 +1375,8 @@ function OrderDetail({ state }: { state: RemoteState<OrdenTrabajo> }) {
         <dd>{state.data.description}</dd>
         <dt>Origen</dt>
         <dd>{originLabels[state.data.origin]}</dd>
+        {state.data.sourceModule && <><dt>Módulo de origen</dt><dd>{state.data.sourceModule}</dd></>}
+        {state.data.sourceRequestId && <><dt>ID de solicitud de origen</dt><dd>{state.data.sourceRequestId}</dd></>}
         <dt>Proyecto asociado</dt>
         <dd>{state.data.projectId ? `Proyecto #${state.data.projectId}` : 'No asociado'}</dd>
         <dt>Ubicacion</dt>
@@ -1583,9 +1595,13 @@ function ClosureForm({
           {errors.workOrderId && <small className="field-error">{errors.workOrderId}</small>}
         </label>
         <label>
-          Ubicacion
-          <input required value={value.location} onChange={(event) => onChange('location', event.target.value)} />
-          {errors.location && <small className="field-error">{errors.location}</small>}
+          Dirección completa
+          <input required value={value.street} onChange={(event) => onChange('street', event.target.value)} />
+          {errors.street && <small className="field-error">{errors.street}</small>}
+        </label>
+        <label>
+          ID de barrio (opcional)
+          <input value={value.neighborhoodId} onChange={(event) => onChange('neighborhoodId', event.target.value)} />
         </label>
         <label>
           Desde
@@ -1661,7 +1677,8 @@ function emptyOrderForm(): OrderFormState {
 function emptyClosureForm(): ClosureFormState {
   return {
     workOrderId: '',
-    location: '',
+    street: '',
+    neighborhoodId: '',
     affectedSections: '',
     requestedFrom: '',
     requestedTo: '',
@@ -1734,7 +1751,10 @@ function buildOrderPayload(form: OrderFormState) {
 function buildClosurePayload(form: ClosureFormState) {
   return {
     workOrderId: Number(form.workOrderId),
-    location: form.location.trim(),
+    location: {
+      street: form.street.trim(),
+      ...(optionalText(form.neighborhoodId) ? { neighborhoodId: form.neighborhoodId.trim() } : {}),
+    },
     affectedSections: form.affectedSections.split(',').map((section) => section.trim()).filter(Boolean),
     requestedFrom: form.requestedFrom,
     requestedTo: form.requestedTo,
