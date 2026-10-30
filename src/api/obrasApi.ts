@@ -155,6 +155,7 @@ export type ListStreetClosuresParams = {
 }
 
 export type ListIntegrationEventsParams = {
+  direction?: 'ALL' | 'INCOMING' | 'OUTGOING'
   page?: number
   size?: number
   sort?: string
@@ -230,7 +231,7 @@ export const obrasApi = {
   createStreetClosure(body: CorteCallePayload) {
     return request<CorteCalle>('/public-works/street-closures', { method: 'POST', body })
   },
-  listIntegrationEvents(params: ListIntegrationEventsParams = {}) {
-    return request<PageResponse<IntegrationEvent>>('/public-works/integration-events', { params })
+  listIntegrationEvents(params: ListIntegrationEventsParams = {}, signal?: AbortSignal) {
+    return request<PageResponse<IntegrationEvent>>('/public-works/integration-events', { params, signal })
   },
 }

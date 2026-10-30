@@ -23,11 +23,11 @@ import type { FormEvent } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ApiError, obrasApi } from './api/obrasApi'
 import { env } from './config/env'
+import { useIntegrationEvents } from './hooks/useIntegrationEvents'
 import { originLabels, permisosPorRol, projectStatusLabels, workOrderStatusLabels } from './constants/ui'
 import type {
   CorteCalle,
   DashboardSummary,
-  IntegrationEvent,
   OrdenTrabajo,
   PageResponse,
   Prioridad,
@@ -121,7 +121,10 @@ function App() {
   const [orders, setOrders] = useState<RemoteState<PageResponse<OrdenTrabajo>>>({ status: 'loading' })
   const [resources, setResources] = useState<RemoteState<ResourcesSummary>>({ status: 'loading' })
   const [closures, setClosures] = useState<RemoteState<PageResponse<CorteCalle>>>({ status: 'loading' })
-  const [integrationEvents, setIntegrationEvents] = useState<RemoteState<PageResponse<IntegrationEvent>>>({ status: 'loading' })
+  const [integrationPage, setIntegrationPage] = useState(0)
+  const [integrationDirection, setIntegrationDirection] = useState<'ALL' | 'INCOMING' | 'OUTGOING'>('ALL')
+  const integrationEvents = useIntegrationEvents(Boolean(session), integrationPage, integrationDirection)
+  const loadIntegrationEvents = integrationEvents.refresh
   const [projectDetail, setProjectDetail] = useState<RemoteState<ProyectoObra> | null>(null)
   const [orderDetail, setOrderDetail] = useState<RemoteState<OrdenTrabajo> | null>(null)
   const [feedback, setFeedback] = useState<Feedback | null>(null)
@@ -250,18 +253,6 @@ function App() {
     }
   }, [])
 
-  const loadIntegrationEvents = useCallback(async () => {
-    setIntegrationEvents({ status: 'loading' })
-    try {
-      setIntegrationEvents({
-        status: 'success',
-        data: await obrasApi.listIntegrationEvents({ page: 0, size: LIST_PAGE_SIZE, sort: 'receivedAt,desc' }),
-      })
-    } catch (error) {
-      setIntegrationEvents({ status: 'error', message: getErrorMessage(error) })
-    }
-  }, [])
-
   useEffect(() => {
     if (!accessToken) return
     void loadDashboard()
@@ -281,11 +272,6 @@ function App() {
     if (!accessToken) return
     void loadClosures()
   }, [accessToken, loadClosures])
-
-  useEffect(() => {
-    if (!accessToken) return
-    void loadIntegrationEvents()
-  }, [accessToken, loadIntegrationEvents])
 
   useEffect(() => {
     if (!accessToken) return
@@ -606,18 +592,18 @@ function App() {
 
             <section className="panel">
               <div className="panel-heading">
-                <h2>Solicitudes recibidas</h2>
+                <h2>Eventos de integración</h2>
                 <FileText size={18} aria-hidden="true" />
               </div>
               <ul className="event-list">
                 {integrationEvents.data?.content.slice(0, 6).map((event) => (
-                  <li key={event.id}>
+                  <li key={`${event.direction}-${event.id}`}>
                     <strong>{event.eventType ?? event.sourceRequestId ?? `Evento #${event.id}`}</strong>
-                    <span>{event.sourceModule ?? 'Módulo de origen no informado'} · {event.status ?? 'Estado no informado'}</span>
+                    <span>{event.direction === 'OUTGOING' ? 'Emitido' : 'Recibido'} · {event.sourceModule ?? 'Módulo de origen no informado'} · {event.status ?? 'Estado no informado'}</span>
                   </li>
                 ))}
-                {integrationEvents.status === 'loading' && <li>Cargando solicitudes recibidas...</li>}
-                {integrationEvents.status === 'error' && <li>No se pudieron cargar las solicitudes recibidas.</li>}
+                {integrationEvents.status === 'loading' && <li>Cargando eventos...</li>}
+                {integrationEvents.status === 'error' && <li>No se pudieron actualizar los eventos.</li>}
               </ul>
             </section>
           </section>
@@ -988,27 +974,43 @@ function App() {
           <section className="panel">
             <div className="panel-heading stacked">
               <div>
-                <h2>Solicitudes recibidas</h2>
-                <p>Información provista por el backend. La recepción y publicación de eventos es responsabilidad del Back.</p>
+                <h2>Eventos de integración</h2>
+                <p>Eventos emitidos y recibidos. Actualización automática cada 5 segundos.</p>
+                <p role="status">{integrationEvents.updatedAt ? `Última actualización: ${integrationEvents.updatedAt.toLocaleTimeString('es-AR')}` : 'Esperando la primera actualización.'}</p>
               </div>
               <button type="button" onClick={() => void loadIntegrationEvents()} disabled={integrationEvents.status === 'loading'}>Actualizar</button>
             </div>
-            {integrationEvents.status === 'loading' && <StateMessage type="loading" message="Cargando solicitudes recibidas..." />}
+            <label>Dirección del evento{' '}
+              <select value={integrationDirection} onChange={event => {
+                setIntegrationDirection(event.target.value as typeof integrationDirection)
+                setIntegrationPage(0)
+              }}>
+                <option value="ALL">Todos</option>
+                <option value="INCOMING">Recibidos</option>
+                <option value="OUTGOING">Emitidos</option>
+              </select>
+            </label>
+            {integrationEvents.status === 'loading' && <StateMessage type="loading" message="Cargando eventos..." />}
             {integrationEvents.status === 'error' && <StateMessage type="error" message={integrationEvents.message ?? 'No se pudieron cargar los eventos de integración.'} onRetry={loadIntegrationEvents} />}
-            {integrationEvents.status === 'success' && integrationEvents.data?.content.length === 0 && <StateMessage type="empty" message="No hay solicitudes recibidas." />}
-            {integrationEvents.status === 'success' && integrationEvents.data && integrationEvents.data.content.length > 0 && (
+            {integrationEvents.status === 'success' && integrationEvents.data?.content.length === 0 && <StateMessage type="empty" message="No hay eventos para esta selección." />}
+            {integrationEvents.data && integrationEvents.data.content.length > 0 && (
               <div className="integration-table">
                 {integrationEvents.data.content.map((event) => (
-                  <article key={event.id} className="integration-row">
-                    <div><strong>{event.eventType ?? `Evento #${event.id}`}</strong><small>ID: {event.id}</small></div>
+                  <article key={`${event.direction}-${event.id}`} className="integration-row">
+                    <div><strong>{event.eventType ?? `Evento #${event.id}`}</strong><small>{event.direction === 'OUTGOING' ? 'Emitido' : 'Recibido'} · ID: {event.id}</small></div>
                     <StatusBadge value={event.status ?? 'Estado no informado'} />
                     <span>{event.sourceModule ?? 'Módulo de origen no informado'}</span>
-                    <p>Solicitud: {event.sourceRequestId ?? 'No informada'}{event.receivedAt ? ` · Recibida: ${event.receivedAt}` : ''}</p>
-                    {event.error ? <code>{event.error}</code> : <code>{event.processedAt ? `Procesada: ${event.processedAt}` : 'Sin detalle adicional'}</code>}
+                    <p>Correlación: {event.sourceRequestId ?? 'No informada'}{event.receivedAt ? ` · Registrado: ${new Date(event.receivedAt).toLocaleString('es-AR')}` : ''}</p>
+                    {event.error ? <code>{event.error}</code> : <code>{event.processedAt ? `${event.direction === 'OUTGOING' ? 'Publicado' : 'Procesado'}: ${new Date(event.processedAt).toLocaleString('es-AR')}` : 'Pendiente de procesamiento o publicación'}</code>}
                   </article>
                 ))}
               </div>
             )}
+            <div className="panel-heading">
+              <button type="button" disabled={integrationPage === 0 || integrationEvents.status === 'loading'} onClick={() => setIntegrationPage(value => value - 1)}>Anterior</button>
+              <span>Página {integrationPage + 1} · {integrationEvents.data?.totalElements ?? 0} eventos</span>
+              <button type="button" disabled={!integrationEvents.data || integrationPage + 1 >= integrationEvents.data.totalPages || integrationEvents.status === 'loading'} onClick={() => setIntegrationPage(value => value + 1)}>Siguiente</button>
+            </div>
           </section>
         )}
       </main>
