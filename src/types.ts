@@ -180,6 +180,7 @@ export type CorteCallePayload = {
  */
 export type IntegrationEvent = {
   id: string | number
+  direction: 'INCOMING' | 'OUTGOING'
   eventType?: string | null
   sourceModule?: string | null
   sourceRequestId?: string | null
