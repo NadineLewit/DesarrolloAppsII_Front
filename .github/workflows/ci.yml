@@ -58,5 +58,21 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Browser E2E and accessibility
+        run: npm run test:e2e
+
+      - name: Upload E2E evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: frontend-e2e-evidence
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+
       - name: Build container without publishing
         run: docker build --tag desarrolloappsii-front:${{ github.sha }} .

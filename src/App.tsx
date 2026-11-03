@@ -1278,7 +1278,14 @@ function ProjectProgressList({ projects, onRetry }: { projects: RemoteState<Page
             <strong>{project.name}</strong>
             <span>{textOrEmpty(project.location)} - {textOrEmpty(project.technicalManager)}</span>
           </div>
-          <div className="bar" aria-label={`Avance ${project.physicalProgress}%`}>
+          <div
+            className="bar"
+            role="progressbar"
+            aria-label={`Avance ${project.physicalProgress}%`}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={project.physicalProgress}
+          >
             <span style={{ width: `${project.physicalProgress}%` }} />
           </div>
           <b>{project.physicalProgress}%</b>
