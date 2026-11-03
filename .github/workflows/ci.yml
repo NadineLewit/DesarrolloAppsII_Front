@@ -41,11 +41,19 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
+      - name: Dependency audit (high and critical)
+        run: npm audit --audit-level=high
+
       - name: Lint
         run: npm run lint
 
-      - name: Test
-        run: npm test
+      - name: Test with full source coverage gate
+        run: npm run test:coverage
+
+      - name: Repeat test suite twice to detect flakiness
+        run: |
+          npm test
+          npm test
 
       - name: Build
         run: npm run build
