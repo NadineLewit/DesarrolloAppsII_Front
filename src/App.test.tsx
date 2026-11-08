@@ -38,6 +38,7 @@ function mockData() {
   vi.mocked(obrasApi.listWorkOrders).mockResolvedValue(page([order]))
   vi.mocked(obrasApi.getResources).mockResolvedValue({ crews: [{ id: 1, nombre: 'Cuadrilla Alfa' }], materials: [], machinery: [] })
   vi.mocked(obrasApi.listStreetClosures).mockResolvedValue(page([]))
+  vi.mocked(obrasApi.listIntegrationEvents).mockResolvedValue(page([]))
   vi.mocked(obrasApi.getProject).mockResolvedValue(project)
   vi.mocked(obrasApi.getWorkOrder).mockResolvedValue(order)
   vi.mocked(obrasApi.logout).mockResolvedValue(undefined)
@@ -98,6 +99,37 @@ describe('App: recorridos de usuario', () => {
     expect(await screen.findByRole('button', { name: 'Ingresar' })).toBeTruthy()
     expect(window.sessionStorage.getItem('obras-publicas-session')).toBeNull()
     expect(obrasApi.logout).toHaveBeenCalledOnce()
+  })
+
+  it('muestra eventos reales, filtra por dirección y pagina la integración', async () => {
+    const user = userEvent.setup()
+    mockSession()
+    vi.mocked(obrasApi.listIntegrationEvents).mockResolvedValue({
+      content: [{
+        id: 'evt-1', direction: 'INCOMING', eventType: 'caseFileResolved',
+        sourceModule: 'ciudadanos', sourceRequestId: 'corr-1', status: 'PROCESSED',
+        receivedAt: '2026-11-08T12:00:00-03:00', processedAt: '2026-11-08T12:00:01-03:00',
+      }],
+      page: 0, size: 20, totalElements: 21, totalPages: 2,
+    })
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: 'Integraciones' }))
+    expect(await screen.findByText('caseFileResolved')).toBeTruthy()
+    expect(screen.getByText('ciudadanos')).toBeTruthy()
+    expect(screen.getByText(/Recibido · ID: evt-1/)).toBeTruthy()
+
+    await user.selectOptions(screen.getByLabelText(/Dirección del evento/), 'OUTGOING')
+    await waitFor(() => expect(obrasApi.listIntegrationEvents).toHaveBeenCalledWith(
+      expect.objectContaining({ direction: 'OUTGOING', page: 0, size: 20 }),
+      expect.any(AbortSignal),
+    ))
+
+    await user.click(screen.getByRole('button', { name: 'Siguiente' }))
+    await waitFor(() => expect(obrasApi.listIntegrationEvents).toHaveBeenCalledWith(
+      expect.objectContaining({ direction: 'OUTGOING', page: 1, size: 20 }),
+      expect.any(AbortSignal),
+    ))
   })
 
   it('no permite crear proyectos al inspector y sí al personal de obras', async () => {
@@ -199,7 +231,7 @@ describe('App: recorridos de usuario', () => {
     mockSession()
     vi.mocked(obrasApi.createStreetClosure).mockResolvedValue({
       id: 1, closureRequestId: 'QA-1', sourceModule: 'M3', workOrderId: 12,
-      location: 'Centro', affectedSections: ['Lima 100', 'Lima 200'], status: 'PENDIENTE',
+      location: { street: 'Centro' }, affectedSections: ['Lima 100', 'Lima 200'], status: 'PENDIENTE',
       requestedFrom: '2026-10-01', requestedTo: '2026-10-02', reason: 'Bacheo',
     })
     render(<App />)
@@ -209,14 +241,14 @@ describe('App: recorridos de usuario', () => {
     await user.click(within(form).getByRole('button', { name: 'Crear solicitud' }))
     expect(obrasApi.createStreetClosure).not.toHaveBeenCalled()
     await user.type(within(form).getByLabelText(/^ID de orden/), '12')
-    await user.type(within(form).getByLabelText(/^Ubicacion/), 'Centro')
+    await user.type(within(form).getByLabelText(/^Dirección completa/), 'Centro')
     await user.type(within(form).getByLabelText(/^Desde/), '2026-10-01')
     await user.type(within(form).getByLabelText(/^Hasta/), '2026-10-02')
     await user.type(within(form).getByLabelText(/^Tramos afectados/), 'Lima 100, Lima 200')
     await user.type(within(form).getByLabelText(/^Motivo/), 'Bacheo')
     await user.click(within(form).getByRole('button', { name: 'Crear solicitud' }))
     await waitFor(() => expect(obrasApi.createStreetClosure).toHaveBeenCalledWith({
-      workOrderId: 12, location: 'Centro', affectedSections: ['Lima 100', 'Lima 200'],
+      workOrderId: 12, location: { street: 'Centro' }, affectedSections: ['Lima 100', 'Lima 200'],
       requestedFrom: '2026-10-01', requestedTo: '2026-10-02', reason: 'Bacheo',
     }))
   })

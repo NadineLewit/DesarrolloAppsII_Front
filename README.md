@@ -119,7 +119,8 @@ Incluye:
 - Formulario de nuevo proyecto con validaciones de nombre, alcance, ubicación, presupuesto, duración y responsable técnico; mantiene el formulario abierto si falla la API.
 - Modal de aprobación para Responsable Autorizado con presupuesto, plazo, fecha y observaciones, conectado al `PATCH /api/public-works/projects/{id}/approve`.
 - Bloqueo de inicio de orden sin cuadrilla y bloqueo visual cuando existe un corte de calle pendiente de autorizacion.
-- Eventos de integracion con direccion, modulos y payloads.
+- Solicitudes de integración recibidas, con módulo de origen, correlación y estado informado por el backend.
+- Cortes de calle con dirección completa (`location.street`), barrio opcional (`location.neighborhoodId`), fechas, motivo y tramos afectados.
 - Ciclo de vida de obra alineado al backend: Borrador, Pendiente de aprobacion, Sin iniciar, En ejecucion, Pausada y Finalizada.
 
 ## Estructura
@@ -141,43 +142,9 @@ src/
     orders.ts
 ```
 
-## Eventos publicados
+## Integraciones
 
-- `publicWorksProjectCreated`
-- `publicWorksProjectSubmittedForApproval`
-- `publicWorksProjectApproved`
-- `publicWorksProjectRejected`
-- `publicWorksProjectStarted`
-- `publicWorksProgressRegistered`
-- `publicWorksExtensionRequested`
-- `publicWorksExtensionApproved`
-- `publicWorksExtensionRejected`
-- `publicWorksProjectSuspended`
-- `publicWorksProjectResumed`
-- `publicWorksProjectCompleted`
-- `workOrderCreated`
-- `workOrderScheduled`
-- `workOrderAssigned`
-- `workOrderStarted`
-- `workOrderPaused`
-- `workOrderDelayed`
-- `workOrderRescheduled`
-- `workOrderCompleted`
-- `workOrderValidated`
-- `workOrderReopened`
-- `streetClosureRequested`
-
-## Eventos consumidos
-
-- `caseFileResolved`
-- `complaintRouted`
-- `complaintEscalated`
-- `infrastructureRepairRequested`
-- `containerDamaged`
-- `treeRiskDetected`
-- `trafficIncidentRegistered`
-- `streetClosureAuthorized`
-- `streetClosureRejected`
+El Front consulta `GET /api/public-works/integration-events` mediante la API del módulo. No se conecta a RabbitMQ ni a Core, ni fija nombres de módulos, eventos o estados: esos valores se muestran tal como los informa el backend.
 
 ## Pendientes de contrato
 
