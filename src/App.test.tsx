@@ -116,7 +116,8 @@ describe('App: recorridos de usuario', () => {
 
     await user.click(screen.getByRole('button', { name: 'Integraciones' }))
     expect(await screen.findByText('caseFileResolved')).toBeTruthy()
-    expect(screen.getByText(/Recibido · ciudadanos/)).toBeTruthy()
+    expect(screen.getByText('ciudadanos')).toBeTruthy()
+    expect(screen.getByText(/Recibido · ID: evt-1/)).toBeTruthy()
 
     await user.selectOptions(screen.getByLabelText(/Dirección del evento/), 'OUTGOING')
     await waitFor(() => expect(obrasApi.listIntegrationEvents).toHaveBeenCalledWith(
