@@ -199,7 +199,7 @@ describe('App: recorridos de usuario', () => {
     mockSession()
     vi.mocked(obrasApi.createStreetClosure).mockResolvedValue({
       id: 1, closureRequestId: 'QA-1', sourceModule: 'M3', workOrderId: 12,
-      location: 'Centro', affectedSections: ['Lima 100', 'Lima 200'], status: 'PENDIENTE',
+      location: { street: 'Centro' }, affectedSections: ['Lima 100', 'Lima 200'], status: 'PENDIENTE',
       requestedFrom: '2026-10-01', requestedTo: '2026-10-02', reason: 'Bacheo',
     })
     render(<App />)
@@ -209,14 +209,14 @@ describe('App: recorridos de usuario', () => {
     await user.click(within(form).getByRole('button', { name: 'Crear solicitud' }))
     expect(obrasApi.createStreetClosure).not.toHaveBeenCalled()
     await user.type(within(form).getByLabelText(/^ID de orden/), '12')
-    await user.type(within(form).getByLabelText(/^Ubicacion/), 'Centro')
+    await user.type(within(form).getByLabelText(/^Dirección completa/), 'Centro')
     await user.type(within(form).getByLabelText(/^Desde/), '2026-10-01')
     await user.type(within(form).getByLabelText(/^Hasta/), '2026-10-02')
     await user.type(within(form).getByLabelText(/^Tramos afectados/), 'Lima 100, Lima 200')
     await user.type(within(form).getByLabelText(/^Motivo/), 'Bacheo')
     await user.click(within(form).getByRole('button', { name: 'Crear solicitud' }))
     await waitFor(() => expect(obrasApi.createStreetClosure).toHaveBeenCalledWith({
-      workOrderId: 12, location: 'Centro', affectedSections: ['Lima 100', 'Lima 200'],
+      workOrderId: 12, location: { street: 'Centro' }, affectedSections: ['Lima 100', 'Lima 200'],
       requestedFrom: '2026-10-01', requestedTo: '2026-10-02', reason: 'Bacheo',
     }))
   })
