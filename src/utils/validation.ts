@@ -21,7 +21,10 @@ export type WorkOrderInput = {
 
 export type StreetClosureInput = {
   workOrderId: string
-  location: string
+  street?: string
+  neighborhoodId?: string
+  /** @deprecated Compatibilidad con formularios previos; el payload usa street. */
+  location?: string
   affectedSections: string
   requestedFrom: string
   requestedTo: string
@@ -30,7 +33,7 @@ export type StreetClosureInput = {
 
 export type FormErrors = Record<string, string>
 
-const required = (value: string, message: string) => value.trim() ? undefined : message
+const required = (value: string | undefined, message: string) => value?.trim() ? undefined : message
 
 export function validateProject(input: ProjectInput): FormErrors {
   const errors: FormErrors = {}
@@ -94,7 +97,6 @@ export function validateStreetClosure(input: StreetClosureInput): FormErrors {
   const errors: FormErrors = {}
   const fields: Array<[keyof StreetClosureInput, string]> = [
     ['workOrderId', 'La orden de trabajo es obligatoria.'],
-    ['location', 'La ubicación es obligatoria.'],
     ['affectedSections', 'Indicá al menos un tramo afectado.'],
     ['requestedFrom', 'La fecha de inicio es obligatoria.'],
     ['requestedTo', 'La fecha de fin es obligatoria.'],
@@ -104,6 +106,9 @@ export function validateStreetClosure(input: StreetClosureInput): FormErrors {
     const error = required(input[field], message)
     if (error) errors[field] = error
   })
+  if (required(input.street ?? input.location, 'La dirección completa es obligatoria.')) {
+    errors.street = 'La dirección completa es obligatoria.'
+  }
   if (input.requestedFrom && input.requestedTo && input.requestedTo < input.requestedFrom) errors.requestedTo = 'La fecha de fin debe ser posterior a la de inicio.'
   return errors
 }

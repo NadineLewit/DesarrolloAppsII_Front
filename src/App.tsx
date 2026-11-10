@@ -23,7 +23,7 @@ import type { FormEvent } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ApiError, obrasApi } from './api/obrasApi'
 import { env } from './config/env'
-import { eventosIntegracion, modulosIntegracion } from './contracts/integrations'
+import { useIntegrationEvents } from './hooks/useIntegrationEvents'
 import { originLabels, permisosPorRol, projectStatusLabels, workOrderStatusLabels } from './constants/ui'
 import type {
   CorteCalle,
@@ -95,7 +95,8 @@ type OrderFormState = {
 
 type ClosureFormState = {
   workOrderId: string
-  location: string
+  street: string
+  neighborhoodId: string
   affectedSections: string
   requestedFrom: string
   requestedTo: string
@@ -120,6 +121,10 @@ function App() {
   const [orders, setOrders] = useState<RemoteState<PageResponse<OrdenTrabajo>>>({ status: 'loading' })
   const [resources, setResources] = useState<RemoteState<ResourcesSummary>>({ status: 'loading' })
   const [closures, setClosures] = useState<RemoteState<PageResponse<CorteCalle>>>({ status: 'loading' })
+  const [integrationPage, setIntegrationPage] = useState(0)
+  const [integrationDirection, setIntegrationDirection] = useState<'ALL' | 'INCOMING' | 'OUTGOING'>('ALL')
+  const integrationEvents = useIntegrationEvents(Boolean(session), integrationPage, integrationDirection)
+  const loadIntegrationEvents = integrationEvents.refresh
   const [projectDetail, setProjectDetail] = useState<RemoteState<ProyectoObra> | null>(null)
   const [orderDetail, setOrderDetail] = useState<RemoteState<OrdenTrabajo> | null>(null)
   const [feedback, setFeedback] = useState<Feedback | null>(null)
@@ -560,21 +565,6 @@ function App() {
 
             <section className="panel full">
               <div className="panel-heading">
-                <h2>Mapa de integraciones</h2>
-                <span className="loading-pill">Fuera de esta entrega</span>
-              </div>
-              <div className="module-grid">
-                {modulosIntegracion.map((modulo) => (
-                  <article key={modulo.id} className="module-card">
-                    <strong>{modulo.id} - {modulo.nombre}</strong>
-                    <span>{modulo.descripcion}</span>
-                  </article>
-                ))}
-              </div>
-            </section>
-
-            <section className="panel full">
-              <div className="panel-heading">
                 <h2>Ciclo de vida de obra publica</h2>
                 <span className="loading-pill">Contrato backend</span>
               </div>
@@ -602,16 +592,18 @@ function App() {
 
             <section className="panel">
               <div className="panel-heading">
-                <h2>Eventos clave</h2>
+                <h2>Eventos de integración</h2>
                 <FileText size={18} aria-hidden="true" />
               </div>
               <ul className="event-list">
-                {eventosIntegracion.slice(0, 6).map((evento) => (
-                  <li key={evento.nombre}>
-                    <strong>{evento.nombre}</strong>
-                    <span>{evento.direccion} - {evento.modulos.join(', ')}</span>
+                {integrationEvents.data?.content.slice(0, 6).map((event) => (
+                  <li key={`${event.direction}-${event.id}`}>
+                    <strong>{event.eventType ?? event.sourceRequestId ?? `Evento #${event.id}`}</strong>
+                    <span>{event.direction === 'OUTGOING' ? 'Emitido' : 'Recibido'} · {event.sourceModule ?? 'Módulo de origen no informado'} · {event.status ?? 'Estado no informado'}</span>
                   </li>
                 ))}
+                {integrationEvents.status === 'loading' && <li>Cargando eventos...</li>}
+                {integrationEvents.status === 'error' && <li>No se pudieron actualizar los eventos.</li>}
               </ul>
             </section>
           </section>
@@ -801,7 +793,8 @@ function App() {
                     <div>
                       <strong>OT #{order.id} - {order.description}</strong>
                       <span>{textOrEmpty(order.location)} - {textOrEmpty(order.interventionType)} - {order.scheduledDate ?? 'Sin fecha'}</span>
-                      <span>{originLabels[order.origin]} - {order.sourceRequestId ?? 'Sin origen externo'} - {order.estimatedDurationHours ?? 0} h estimadas</span>
+                      <span>{originLabels[order.origin]} - {order.estimatedDurationHours ?? 0} h estimadas</span>
+                      {(order.sourceModule || order.sourceRequestId) && <span>Origen externo: {order.sourceModule ?? 'Módulo no informado'} · Solicitud: {order.sourceRequestId ?? 'Sin ID informado'}</span>}
                       {order.projectId && <span>Proyecto asociado: #{order.projectId}</span>}
                     </div>
                     <PriorityBadge value={order.priority} />
@@ -963,7 +956,8 @@ function App() {
                     <Clock3 size={18} aria-hidden="true" />
                     <div>
                       <strong>{closure.closureRequestId} - OT #{closure.workOrderId}</strong>
-                      <span>{closure.location}</span>
+                      <span>{closure.location.street}</span>
+                      {closure.location.neighborhoodId !== undefined && closure.location.neighborhoodId !== null && <span>Barrio: {closure.location.neighborhoodId}</span>}
                       <span>{closure.affectedSections.join(', ')}</span>
                     </div>
                     <span>{closure.requestedFrom} al {closure.requestedTo}</span>
@@ -980,24 +974,42 @@ function App() {
           <section className="panel">
             <div className="panel-heading stacked">
               <div>
-                <h2>Eventos e integraciones</h2>
-                <p>La integracion completa entre modulos queda fuera de esta primera entrega.</p>
+                <h2>Eventos de integración</h2>
+                <p>Eventos emitidos y recibidos. Actualización automática cada 5 segundos.</p>
+                <p role="status">{integrationEvents.updatedAt ? `Última actualización: ${integrationEvents.updatedAt.toLocaleTimeString('es-AR')}` : 'Esperando la primera actualización.'}</p>
               </div>
-              <span className="loading-pill">Bloqueado por backend externo</span>
+              <button type="button" onClick={() => void loadIntegrationEvents()} disabled={integrationEvents.status === 'loading'}>Actualizar</button>
             </div>
-            <div className="integration-table">
-              {eventosIntegracion.map((evento) => (
-                <article key={evento.nombre} className="integration-row">
-                  <div>
-                    <strong>{evento.nombre}</strong>
-                    {evento.nota && <small>{evento.nota}</small>}
-                  </div>
-                  <StatusBadge value={evento.direccion} />
-                  <span>{evento.modulos.join(', ')}</span>
-                  <p>{evento.descripcion}</p>
-                  <code>{evento.payload.join(', ')}</code>
-                </article>
-              ))}
+            <label>Dirección del evento{' '}
+              <select value={integrationDirection} onChange={event => {
+                setIntegrationDirection(event.target.value as typeof integrationDirection)
+                setIntegrationPage(0)
+              }}>
+                <option value="ALL">Todos</option>
+                <option value="INCOMING">Recibidos</option>
+                <option value="OUTGOING">Emitidos</option>
+              </select>
+            </label>
+            {integrationEvents.status === 'loading' && <StateMessage type="loading" message="Cargando eventos..." />}
+            {integrationEvents.status === 'error' && <StateMessage type="error" message={integrationEvents.message ?? 'No se pudieron cargar los eventos de integración.'} onRetry={loadIntegrationEvents} />}
+            {integrationEvents.status === 'success' && integrationEvents.data?.content.length === 0 && <StateMessage type="empty" message="No hay eventos para esta selección." />}
+            {integrationEvents.data && integrationEvents.data.content.length > 0 && (
+              <div className="integration-table">
+                {integrationEvents.data.content.map((event) => (
+                  <article key={`${event.direction}-${event.id}`} className="integration-row">
+                    <div><strong>{event.eventType ?? `Evento #${event.id}`}</strong><small>{event.direction === 'OUTGOING' ? 'Emitido' : 'Recibido'} · ID: {event.id}</small></div>
+                    <StatusBadge value={event.status ?? 'Estado no informado'} />
+                    <span>{event.sourceModule ?? 'Módulo de origen no informado'}</span>
+                    <p>Correlación: {event.sourceRequestId ?? 'No informada'}{event.receivedAt ? ` · Registrado: ${new Date(event.receivedAt).toLocaleString('es-AR')}` : ''}</p>
+                    {event.error ? <code>{event.error}</code> : <code>{event.processedAt ? `${event.direction === 'OUTGOING' ? 'Publicado' : 'Procesado'}: ${new Date(event.processedAt).toLocaleString('es-AR')}` : 'Pendiente de procesamiento o publicación'}</code>}
+                  </article>
+                ))}
+              </div>
+            )}
+            <div className="panel-heading">
+              <button type="button" disabled={integrationPage === 0 || integrationEvents.status === 'loading'} onClick={() => setIntegrationPage(value => value - 1)}>Anterior</button>
+              <span>Página {integrationPage + 1} · {integrationEvents.data?.totalElements ?? 0} eventos</span>
+              <button type="button" disabled={!integrationEvents.data || integrationPage + 1 >= integrationEvents.data.totalPages || integrationEvents.status === 'loading'} onClick={() => setIntegrationPage(value => value + 1)}>Siguiente</button>
             </div>
           </section>
         )}
@@ -1278,7 +1290,14 @@ function ProjectProgressList({ projects, onRetry }: { projects: RemoteState<Page
             <strong>{project.name}</strong>
             <span>{textOrEmpty(project.location)} - {textOrEmpty(project.technicalManager)}</span>
           </div>
-          <div className="bar" aria-label={`Avance ${project.physicalProgress}%`}>
+          <div
+            className="bar"
+            role="progressbar"
+            aria-label={`Avance ${project.physicalProgress}%`}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={project.physicalProgress}
+          >
             <span style={{ width: `${project.physicalProgress}%` }} />
           </div>
           <b>{project.physicalProgress}%</b>
@@ -1358,6 +1377,8 @@ function OrderDetail({ state }: { state: RemoteState<OrdenTrabajo> }) {
         <dd>{state.data.description}</dd>
         <dt>Origen</dt>
         <dd>{originLabels[state.data.origin]}</dd>
+        {state.data.sourceModule && <><dt>Módulo de origen</dt><dd>{state.data.sourceModule}</dd></>}
+        {state.data.sourceRequestId && <><dt>ID de solicitud de origen</dt><dd>{state.data.sourceRequestId}</dd></>}
         <dt>Proyecto asociado</dt>
         <dd>{state.data.projectId ? `Proyecto #${state.data.projectId}` : 'No asociado'}</dd>
         <dt>Ubicacion</dt>
@@ -1576,9 +1597,13 @@ function ClosureForm({
           {errors.workOrderId && <small className="field-error">{errors.workOrderId}</small>}
         </label>
         <label>
-          Ubicacion
-          <input required value={value.location} onChange={(event) => onChange('location', event.target.value)} />
-          {errors.location && <small className="field-error">{errors.location}</small>}
+          Dirección completa
+          <input required value={value.street} onChange={(event) => onChange('street', event.target.value)} />
+          {errors.street && <small className="field-error">{errors.street}</small>}
+        </label>
+        <label>
+          ID de barrio (opcional)
+          <input value={value.neighborhoodId} onChange={(event) => onChange('neighborhoodId', event.target.value)} />
         </label>
         <label>
           Desde
@@ -1654,7 +1679,8 @@ function emptyOrderForm(): OrderFormState {
 function emptyClosureForm(): ClosureFormState {
   return {
     workOrderId: '',
-    location: '',
+    street: '',
+    neighborhoodId: '',
     affectedSections: '',
     requestedFrom: '',
     requestedTo: '',
@@ -1727,7 +1753,10 @@ function buildOrderPayload(form: OrderFormState) {
 function buildClosurePayload(form: ClosureFormState) {
   return {
     workOrderId: Number(form.workOrderId),
-    location: form.location.trim(),
+    location: {
+      street: form.street.trim(),
+      ...(optionalText(form.neighborhoodId) ? { neighborhoodId: form.neighborhoodId.trim() } : {}),
+    },
     affectedSections: form.affectedSections.split(',').map((section) => section.trim()).filter(Boolean),
     requestedFrom: form.requestedFrom,
     requestedTo: form.requestedTo,

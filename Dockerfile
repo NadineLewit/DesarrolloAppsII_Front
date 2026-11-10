@@ -12,6 +12,8 @@ RUN npm run build
 
 FROM nginx:1.29-alpine
 
+ENV BACKEND_SCHEME=https
+
 COPY nginx.conf /etc/nginx/templates/default.conf.template
 COPY --from=build /app/dist /usr/share/nginx/html
 

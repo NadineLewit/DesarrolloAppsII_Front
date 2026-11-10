@@ -334,7 +334,7 @@ textarea[aria-invalid="true"] {
 }
 
 .loading-pill {
-  color: var(--accent);
+  color: #1d4ed8;
   background: rgba(37, 99, 235, 0.1);
 }
 
@@ -700,13 +700,14 @@ textarea[aria-invalid="true"] {
 
 .integration-row {
   display: grid;
-  grid-template-columns: minmax(210px, 0.85fr) 92px 96px minmax(260px, 1.4fr) minmax(260px, 1.2fr);
+  grid-template-columns: minmax(0, 1fr) 110px 100px minmax(0, 1.3fr) minmax(0, 1fr);
   align-items: center;
   gap: 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 14px;
   background: #fbfcfd;
+  overflow-wrap: anywhere;
 }
 
 .integration-row strong,
