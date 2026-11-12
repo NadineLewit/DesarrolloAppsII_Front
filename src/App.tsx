@@ -16,6 +16,7 @@ import {
   Plus,
   Search,
   ShieldCheck,
+  Sparkles,
   Truck,
   Users,
 } from 'lucide-react'
@@ -43,6 +44,7 @@ import type {
 } from './types'
 import { formatMoney } from './utils/formatters'
 import { hasErrors, type FormErrors, validateProject, validateProjectApproval, validateStreetClosure, validateWorkOrder } from './utils/validation'
+import { IncidentTriagePanel } from './components/IncidentTriagePanel'
 import './App.css'
 
 const ORDER_PAGE_SIZE = 5
@@ -510,6 +512,9 @@ function App() {
             { id: 'recursos', label: 'Recursos', icon: Truck },
             { id: 'cortes', label: 'Cortes', icon: ShieldCheck },
             { id: 'integraciones', label: 'Integraciones', icon: Network },
+            ...(['PERSONAL_OBRAS', 'INGENIERO_ARQUITECTO'].includes(rol)
+              ? [{ id: 'asistente', label: 'Asistente IA', icon: Sparkles }]
+              : []),
           ].map((item) => {
             const Icon = item.icon
             return (
@@ -1013,6 +1018,8 @@ function App() {
             </div>
           </section>
         )}
+
+        {seccionActiva === 'asistente' && <IncidentTriagePanel />}
       </main>
     </div>
   )
@@ -1025,6 +1032,7 @@ const titulos: Record<Seccion, string> = {
   recursos: 'Cuadrillas y recursos',
   cortes: 'Cortes de calle',
   integraciones: 'Integraciones del modulo',
+  asistente: 'Asistente de clasificación',
 }
 
 const flujoObra = [

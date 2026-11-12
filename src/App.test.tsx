@@ -429,4 +429,31 @@ describe('App: recorridos de usuario', () => {
     expect(await screen.findByRole('button', { name: 'Ingresar' })).toBeTruthy()
     expect(window.sessionStorage.getItem('obras-publicas-access-token')).toBeNull()
   })
+
+  it('muestra una sugerencia editable y exige revisión humana sin ejecutar acciones', async () => {
+    const user = userEvent.setup()
+    mockSession('PERSONAL_OBRAS')
+    vi.mocked(obrasApi.triageIncident).mockResolvedValue({
+      summary: 'Daño en pavimento', damageCategory: 'PAVEMENT', suggestedPriority: 'HIGH',
+      recommendedResourceType: 'ROAD_CREW', confidence: 0.91, humanReviewRequired: true,
+      reasons: ['La descripción refiere a la calzada'],
+    })
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Asistente IA' }))
+    await user.type(screen.getByLabelText('Descripción del incidente'), 'Bache profundo frente a una escuela')
+    await user.click(screen.getByRole('button', { name: 'Obtener sugerencia' }))
+    expect(await screen.findByText('Daño en pavimento')).toBeTruthy()
+    expect(obrasApi.triageIncident).toHaveBeenCalledWith('Bache profundo frente a una escuela')
+    await user.selectOptions(screen.getByLabelText('Prioridad sugerida'), 'MEDIUM')
+    await user.click(screen.getByLabelText('Revisé la sugerencia como persona responsable.'))
+    expect(screen.getByText(/No se creó ni modificó ninguna orden/)).toBeTruthy()
+    expect(obrasApi.createWorkOrder).not.toHaveBeenCalled()
+  })
+
+  it('oculta el asistente para roles operativos', async () => {
+    mockSession('OPERARIO_CONTRATISTA')
+    render(<App />)
+    await screen.findByText('Tablero operativo')
+    expect(screen.queryByRole('button', { name: 'Asistente IA' })).toBeNull()
+  })
 })
