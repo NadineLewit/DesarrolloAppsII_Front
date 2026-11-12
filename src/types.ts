@@ -6,7 +6,17 @@ export type Rol =
   | 'OPERARIO_CONTRATISTA'
   | 'INSPECTOR_OBRA'
 
-export type Seccion = 'dashboard' | 'obras' | 'ordenes' | 'recursos' | 'cortes' | 'integraciones'
+export type Seccion = 'dashboard' | 'obras' | 'ordenes' | 'recursos' | 'cortes' | 'integraciones' | 'asistente'
+
+export type IncidentTriageSuggestion = {
+  summary: string
+  damageCategory: 'PAVEMENT' | 'SIDEWALK' | 'STREETLIGHT' | 'DRAINAGE' | 'TREE' | 'STRUCTURE' | 'OTHER'
+  suggestedPriority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
+  recommendedResourceType: 'ROAD_CREW' | 'SIDEWALK_CREW' | 'ELECTRICAL_CREW' | 'DRAINAGE_CREW' | 'ARBORIST' | 'STRUCTURAL_INSPECTION' | 'MANUAL_REVIEW'
+  confidence: number
+  humanReviewRequired: true
+  reasons: string[]
+}
 
 export type ProjectStatus =
   | 'BORRADOR'

@@ -5,6 +5,7 @@ import type {
   CorteCallePayload,
   DashboardSummary,
   IntegrationEvent,
+  IncidentTriageSuggestion,
   LoginResponse,
   OrdenTrabajo,
   OrdenTrabajoPayload,
@@ -233,5 +234,11 @@ export const obrasApi = {
   },
   listIntegrationEvents(params: ListIntegrationEventsParams = {}, signal?: AbortSignal) {
     return request<PageResponse<IntegrationEvent>>('/public-works/integration-events', { params, signal })
+  },
+  triageIncident(description: string) {
+    return request<IncidentTriageSuggestion>('/public-works/assistant/triage', {
+      method: 'POST',
+      body: { description },
+    })
   },
 }
