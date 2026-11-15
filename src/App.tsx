@@ -971,7 +971,7 @@ function App() {
                 ))}
               </div>
             )}
-            <p className="blocked-note">Autorizacion o rechazo de Transito queda bloqueado por backend/integracion externa.</p>
+            <p className="blocked-note">Las respuestas de Tránsito se reciben por Core y actualizan automáticamente el estado del corte.</p>
           </section>
         )}
 
