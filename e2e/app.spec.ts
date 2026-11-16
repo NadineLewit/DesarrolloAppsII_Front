@@ -143,3 +143,15 @@ test('E2E-06: no presenta violaciones de accesibilidad serias o críticas', asyn
   const blocking = results.violations.filter(({ impact }) => impact === 'serious' || impact === 'critical')
   expect(blocking, JSON.stringify(blocking, null, 2)).toEqual([])
 })
+
+test('E2E-07: órdenes no desborda horizontalmente a 768 px', async ({ page }) => {
+  await page.setViewportSize({ width: 768, height: 1024 })
+  await seedSession(page)
+  await mockApi(page)
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Ordenes' }).click()
+  await expect(page.getByRole('heading', { level: 1, name: 'Ordenes de trabajo' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Nueva orden' })).toBeVisible()
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+  expect(overflow).toBeLessThanOrEqual(0)
+})
