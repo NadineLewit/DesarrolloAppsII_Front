@@ -29,6 +29,7 @@ import { originLabels, permisosPorRol, projectStatusLabels, workOrderStatusLabel
 import type {
   CorteCalle,
   DashboardSummary,
+  MessagingSummary,
   OrdenTrabajo,
   PageResponse,
   Prioridad,
@@ -128,6 +129,7 @@ function App() {
   const [integrationDirection, setIntegrationDirection] = useState<'ALL' | 'INCOMING' | 'OUTGOING'>('ALL')
   const integrationEvents = useIntegrationEvents(Boolean(session), integrationPage, integrationDirection)
   const loadIntegrationEvents = integrationEvents.refresh
+  const [messagingSummary, setMessagingSummary] = useState<RemoteState<MessagingSummary>>({ status: 'loading' })
   const [projectDetail, setProjectDetail] = useState<RemoteState<ProyectoObra> | null>(null)
   const [orderDetail, setOrderDetail] = useState<RemoteState<OrdenTrabajo> | null>(null)
   const [feedback, setFeedback] = useState<Feedback | null>(null)
@@ -257,6 +259,15 @@ function App() {
     }
   }, [])
 
+  const loadMessagingSummary = useCallback(async () => {
+    setMessagingSummary({ status: 'loading' })
+    try {
+      setMessagingSummary({ status: 'success', data: await obrasApi.getMessagingSummary() })
+    } catch (error) {
+      setMessagingSummary({ status: 'error', message: getErrorMessage(error) })
+    }
+  }, [])
+
   useEffect(() => {
     if (!accessToken) return
     void loadDashboard()
@@ -281,6 +292,11 @@ function App() {
     if (!accessToken) return
     void loadOrders()
   }, [accessToken, loadOrders])
+
+  useEffect(() => {
+    if (!accessToken) return
+    void loadMessagingSummary()
+  }, [accessToken, loadMessagingSummary])
 
   useEffect(() => {
     const onUnauthorized = () => {
@@ -997,8 +1013,20 @@ function App() {
                 <p>Eventos emitidos y recibidos. Actualización automática cada 5 segundos.</p>
                 <p role="status">{integrationEvents.updatedAt ? `Última actualización: ${integrationEvents.updatedAt.toLocaleTimeString('es-AR')}` : 'Esperando la primera actualización.'}</p>
               </div>
-              <button type="button" onClick={() => void loadIntegrationEvents()} disabled={integrationEvents.status === 'loading'}>Actualizar</button>
+              <button type="button" onClick={() => void Promise.all([loadIntegrationEvents(), loadMessagingSummary()])} disabled={integrationEvents.status === 'loading'}>Actualizar</button>
             </div>
+            {messagingSummary.status === 'error' && <StateMessage type="error" message={messagingSummary.message ?? 'No se pudo cargar la telemetría de mensajería.'} onRetry={loadMessagingSummary} />}
+            {messagingSummary.data && (
+              <>
+                <div className="dashboard-grid messaging-summary" aria-label="Telemetría de mensajería">
+                  <MetricCard icon={Network} label="Consumidos" value={String(messagingSummary.data.processed)} trend={`${messagingSummary.data.received} recibidos persistidos`} />
+                  <MetricCard icon={ShieldCheck} label="Deduplicados" value={String(messagingSummary.data.duplicateEventsCurrentRevision)} trend="Desde la revisión activa" />
+                  <MetricCard icon={AlertTriangle} label="Nack" value={String(messagingSummary.data.nackedEventsCurrentRevision)} trend={`${messagingSummary.data.errors + messagingSummary.data.rejected} con error o rechazo persistido`} />
+                  <MetricCard icon={Gauge} label="Outbox pendiente" value={String(messagingSummary.data.pendingOutbox)} trend={`${messagingSummary.data.published} publicados`} />
+                </div>
+                <p className="blocked-note">Los contadores de deduplicados y nack corresponden a la revisión activa; los estados de Inbox y Outbox permanecen en PostgreSQL.</p>
+              </>
+            )}
             <label>Dirección del evento{' '}
               <select value={integrationDirection} onChange={event => {
                 setIntegrationDirection(event.target.value as typeof integrationDirection)

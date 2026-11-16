@@ -196,6 +196,19 @@ export type IntegrationEvent = {
   payload?: unknown
 }
 
+export type MessagingSummary = {
+  received: number
+  processed: number
+  rejected: number
+  errors: number
+  pendingInbox: number
+  published: number
+  pendingOutbox: number
+  duplicateEventsCurrentRevision: number
+  nackedEventsCurrentRevision: number
+  publicationFailuresCurrentRevision: number
+}
+
 export type DashboardSummary = {
   asOfDate: string
   totalProjects: number

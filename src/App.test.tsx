@@ -39,6 +39,11 @@ function mockData() {
   vi.mocked(obrasApi.getResources).mockResolvedValue({ crews: [{ id: 1, nombre: 'Cuadrilla Alfa' }], materials: [], machinery: [] })
   vi.mocked(obrasApi.listStreetClosures).mockResolvedValue(page([]))
   vi.mocked(obrasApi.listIntegrationEvents).mockResolvedValue(page([]))
+  vi.mocked(obrasApi.getMessagingSummary).mockResolvedValue({
+    received: 4, processed: 3, rejected: 0, errors: 1, pendingInbox: 0,
+    published: 8, pendingOutbox: 0, duplicateEventsCurrentRevision: 2,
+    nackedEventsCurrentRevision: 1, publicationFailuresCurrentRevision: 0,
+  })
   vi.mocked(obrasApi.getProject).mockResolvedValue(project)
   vi.mocked(obrasApi.getWorkOrder).mockResolvedValue(order)
   vi.mocked(obrasApi.logout).mockResolvedValue(undefined)
@@ -118,6 +123,10 @@ describe('App: recorridos de usuario', () => {
     expect(await screen.findByText('caseFileResolved')).toBeTruthy()
     expect(screen.getByText('ciudadanos')).toBeTruthy()
     expect(screen.getByText(/Recibido · ID: evt-1/)).toBeTruthy()
+    expect(screen.getByText('Consumidos')).toBeTruthy()
+    expect(screen.getByText('Deduplicados')).toBeTruthy()
+    expect(screen.getByText('Nack')).toBeTruthy()
+    expect(screen.getByText('Outbox pendiente')).toBeTruthy()
 
     await user.selectOptions(screen.getByLabelText(/Dirección del evento/), 'OUTGOING')
     await waitFor(() => expect(obrasApi.listIntegrationEvents).toHaveBeenCalledWith(
