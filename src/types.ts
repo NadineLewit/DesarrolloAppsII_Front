@@ -162,7 +162,7 @@ export type CorteCalle = {
   closureRequestId: string
   sourceModule: string
   workOrderId: number
-  location: StreetClosureLocation
+  location: string
   affectedSections: string[]
   status: string
   requestedFrom: string
@@ -170,16 +170,9 @@ export type CorteCalle = {
   reason: string
 }
 
-export type StreetClosureLocation = {
-  /** Dirección completa legible para las personas usuarias. */
-  street: string
-  /** Lo informa el módulo de origen cuando lo conoce. */
-  neighborhoodId?: string | number | null
-}
-
 export type CorteCallePayload = {
   workOrderId: number
-  location: StreetClosureLocation
+  location: string
   affectedSections: string[]
   requestedFrom: string
   requestedTo: string
@@ -195,9 +188,9 @@ export type IntegrationEvent = {
   direction: 'INCOMING' | 'OUTGOING'
   eventType?: string | null
   sourceModule?: string | null
-  sourceRequestId?: string | null
   status?: string | null
-  receivedAt?: string | null
+  correlationId?: string | null
+  occurredAt?: string | null
   processedAt?: string | null
   error?: string | null
   payload?: unknown

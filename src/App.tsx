@@ -612,7 +612,7 @@ function App() {
               <ul className="event-list">
                 {integrationEvents.data?.content.slice(0, 6).map((event) => (
                   <li key={`${event.direction}-${event.id}`}>
-                    <strong>{event.eventType ?? event.sourceRequestId ?? `Evento #${event.id}`}</strong>
+                    <strong>{event.eventType ?? `Evento #${event.id}`}</strong>
                     <span>{event.direction === 'OUTGOING' ? 'Emitido' : 'Recibido'} · {event.sourceModule ?? 'Módulo de origen no informado'} · {event.status ?? 'Estado no informado'}</span>
                   </li>
                 ))}
@@ -976,8 +976,7 @@ function App() {
                     <Clock3 size={18} aria-hidden="true" />
                     <div>
                       <strong>{closure.closureRequestId} - OT #{closure.workOrderId}</strong>
-                      <span>{closure.location.street}</span>
-                      {closure.location.neighborhoodId !== undefined && closure.location.neighborhoodId !== null && <span>Barrio: {closure.location.neighborhoodId}</span>}
+                      <span>{closure.location}</span>
                       <span>{closure.affectedSections.join(', ')}</span>
                     </div>
                     <span>{closure.requestedFrom} al {closure.requestedTo}</span>
@@ -1020,8 +1019,12 @@ function App() {
                     <div><strong>{event.eventType ?? `Evento #${event.id}`}</strong><small>{event.direction === 'OUTGOING' ? 'Emitido' : 'Recibido'} · ID: {event.id}</small></div>
                     <StatusBadge value={event.status ?? 'Estado no informado'} />
                     <span>{event.sourceModule ?? 'Módulo de origen no informado'}</span>
-                    <p>Correlación: {event.sourceRequestId ?? 'No informada'}{event.receivedAt ? ` · Registrado: ${new Date(event.receivedAt).toLocaleString('es-AR')}` : ''}</p>
-                    {event.error ? <code>{event.error}</code> : <code>{event.processedAt ? `${event.direction === 'OUTGOING' ? 'Publicado' : 'Procesado'}: ${new Date(event.processedAt).toLocaleString('es-AR')}` : 'Pendiente de procesamiento o publicación'}</code>}
+                    <p>Correlación: {event.correlationId ?? 'No informada'}{event.occurredAt ? ` · Registrado: ${new Date(event.occurredAt).toLocaleString('es-AR')}` : ''}</p>
+                    {event.error ? <code>{event.error}</code> : <code>{event.processedAt
+                      ? `${event.direction === 'OUTGOING' ? 'Publicado' : 'Procesado'}: ${new Date(event.processedAt).toLocaleString('es-AR')}`
+                      : event.status === 'PENDING' || event.status === 'RECEIVED'
+                        ? 'Pendiente de procesamiento o publicación'
+                        : 'Sin fecha final informada'}</code>}
                   </article>
                 ))}
               </div>
@@ -1533,7 +1536,9 @@ function ProjectForm({
         </label>
         <label className="wide-field">
           Descripcion
-          <textarea maxLength={1000} value={value.description} onChange={(event) => onChange('description', event.target.value)} />
+          <textarea aria-invalid={Boolean(errors.description)} value={value.description} onChange={(event) => onChange('description', event.target.value)} />
+          <small>{value.description.length}/1000 caracteres</small>
+          {errors.description && <small className="field-error">{errors.description}</small>}
         </label>
       </div>
       <button type="submit" disabled={disabled}>{mode === 'edit' ? 'Guardar cambios' : 'Crear proyecto'}</button>
@@ -1821,10 +1826,7 @@ function buildOrderPayload(form: OrderFormState) {
 function buildClosurePayload(form: ClosureFormState) {
   return {
     workOrderId: Number(form.workOrderId),
-    location: {
-      street: form.street.trim(),
-      ...(optionalText(form.neighborhoodId) ? { neighborhoodId: form.neighborhoodId.trim() } : {}),
-    },
+    location: form.street.trim(),
     affectedSections: form.affectedSections.split(',').map((section) => section.trim()).filter(Boolean),
     requestedFrom: form.requestedFrom,
     requestedTo: form.requestedTo,

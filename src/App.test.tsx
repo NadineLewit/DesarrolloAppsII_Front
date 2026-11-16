@@ -107,8 +107,8 @@ describe('App: recorridos de usuario', () => {
     vi.mocked(obrasApi.listIntegrationEvents).mockResolvedValue({
       content: [{
         id: 'evt-1', direction: 'INCOMING', eventType: 'caseFileResolved',
-        sourceModule: 'ciudadanos', sourceRequestId: 'corr-1', status: 'PROCESSED',
-        receivedAt: '2026-11-08T12:00:00-03:00', processedAt: '2026-11-08T12:00:01-03:00',
+        sourceModule: 'ciudadanos', correlationId: 'corr-1', status: 'PROCESSED',
+        occurredAt: '2026-11-08T12:00:00-03:00', processedAt: '2026-11-08T12:00:01-03:00',
       }],
       page: 0, size: 20, totalElements: 21, totalPages: 2,
     })
@@ -231,7 +231,7 @@ describe('App: recorridos de usuario', () => {
     mockSession()
     vi.mocked(obrasApi.createStreetClosure).mockResolvedValue({
       id: 1, closureRequestId: 'QA-1', sourceModule: 'M3', workOrderId: 12,
-      location: { street: 'Centro' }, affectedSections: ['Lima 100', 'Lima 200'], status: 'PENDIENTE',
+      location: 'Centro', affectedSections: ['Lima 100', 'Lima 200'], status: 'PENDIENTE',
       requestedFrom: '2026-10-01', requestedTo: '2026-10-02', reason: 'Bacheo',
     })
     render(<App />)
@@ -248,7 +248,7 @@ describe('App: recorridos de usuario', () => {
     await user.type(within(form).getByLabelText(/^Motivo/), 'Bacheo')
     await user.click(within(form).getByRole('button', { name: 'Crear solicitud' }))
     await waitFor(() => expect(obrasApi.createStreetClosure).toHaveBeenCalledWith({
-      workOrderId: 12, location: { street: 'Centro' }, affectedSections: ['Lima 100', 'Lima 200'],
+      workOrderId: 12, location: 'Centro', affectedSections: ['Lima 100', 'Lima 200'],
       requestedFrom: '2026-10-01', requestedTo: '2026-10-02', reason: 'Bacheo',
     }))
   })
