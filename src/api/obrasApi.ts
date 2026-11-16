@@ -37,6 +37,7 @@ type ApiErrorBody = {
 type RequestOptions = Omit<RequestInit, 'body'> & {
   body?: unknown
   params?: QueryParams
+  skipAuth?: boolean
 }
 
 export class ApiError extends Error {
@@ -84,7 +85,7 @@ async function request<T>(path: string, options: RequestOptions = {}) {
   }
 
   const accessToken = window.sessionStorage.getItem('obras-publicas-access-token')
-  if (accessToken && !headers.has('Authorization')) {
+  if (!options.skipAuth && accessToken && !headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${accessToken}`)
   }
 
@@ -113,8 +114,8 @@ async function request<T>(path: string, options: RequestOptions = {}) {
       errorBody.code,
       errorBody.details,
     )
-    if (response.status === 401) {
-      window.dispatchEvent(new CustomEvent('obras-api-unauthorized'))
+    if (response.status === 401 && !options.skipAuth) {
+      window.dispatchEvent(new CustomEvent('obras-api-unauthorized', { detail: { accessToken } }))
     }
     throw error
   }
@@ -166,7 +167,7 @@ export type ListIntegrationEventsParams = {
 
 export const obrasApi = {
   login(username: string, password: string) {
-    return request<LoginResponse>('/auth/login', { method: 'POST', body: { username, password } })
+    return request<LoginResponse>('/auth/login', { method: 'POST', body: { username, password }, skipAuth: true })
   },
   me() {
     return request<{ username: string; role: Rol }>('/auth/me')

@@ -24,6 +24,7 @@ describe('obrasApi: contrato HTTP del frontend', () => {
   })
 
   it('envía el login por /api en el mismo origen sin credenciales de base de datos', async () => {
+    window.sessionStorage.setItem('obras-publicas-access-token', 'token-vencido-de-otra-pestaña')
     fetchMock.mockResolvedValueOnce(jsonResponse({ accessToken: 'token-qa', username: 'personal.obras', role: 'PERSONAL_OBRAS' }))
 
     await expect(obrasApi.login('personal.obras', 'clave-qa')).resolves.toMatchObject({ accessToken: 'token-qa' })
@@ -74,6 +75,7 @@ describe('obrasApi: contrato HTTP del frontend', () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ message: 'Token vencido' }, 401))
     await expect(obrasApi.getProject(1)).rejects.toMatchObject({ status: 401, message: 'Token vencido' })
     expect(unauthorized).toHaveBeenCalledOnce()
+    expect(unauthorized.mock.calls[0][0]).toMatchObject({ detail: { accessToken: null } })
   })
 
   it('usa un error legible si la respuesta de error no contiene JSON válido', async () => {

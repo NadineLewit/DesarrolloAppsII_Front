@@ -28,6 +28,11 @@ describe('validaciones de formularios', () => {
     expect(hasErrors(errors)).toBe(true)
   })
 
+  it('rechaza una fecha de inicio pasada con un mensaje específico', () => {
+    const errors = validateStreetClosure({ workOrderId: '1', location: 'Lima 100', affectedSections: 'Lima 100-200', requestedFrom: '2020-01-01', requestedTo: '2020-01-02', reason: 'Reparación' })
+    expect(errors.requestedFrom).toBe('La fecha de inicio no puede estar en el pasado.')
+  })
+
   it('acepta valores válidos y no exige correlación en una orden manual', () => {
     expect(hasErrors(validateProject({
       name: 'Repavimentación', scope: 'Tramo completo', location: 'Av. Lima', estimatedBudget: '1000', estimatedStartDate: '2026-09-22', estimatedDurationDays: '12', technicalManager: 'Ana Pérez',
@@ -37,7 +42,7 @@ describe('validaciones de formularios', () => {
       projectId: '',
     }))).toBe(false)
     expect(hasErrors(validateStreetClosure({
-      workOrderId: '1', location: 'Av. Lima', affectedSections: '100-200', requestedFrom: '2026-09-22', requestedTo: '2026-09-22', reason: 'Obra',
+      workOrderId: '1', location: 'Av. Lima', affectedSections: '100-200', requestedFrom: '2099-09-22', requestedTo: '2099-09-22', reason: 'Obra',
     }))).toBe(false)
   })
 

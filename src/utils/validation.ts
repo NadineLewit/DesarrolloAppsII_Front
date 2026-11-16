@@ -111,6 +111,9 @@ export function validateStreetClosure(input: StreetClosureInput): FormErrors {
   if (required(input.street ?? input.location, 'La dirección completa es obligatoria.')) {
     errors.street = 'La dirección completa es obligatoria.'
   }
+  const today = new Date()
+  const localToday = [today.getFullYear(), String(today.getMonth() + 1).padStart(2, '0'), String(today.getDate()).padStart(2, '0')].join('-')
+  if (input.requestedFrom && input.requestedFrom < localToday) errors.requestedFrom = 'La fecha de inicio no puede estar en el pasado.'
   if (input.requestedFrom && input.requestedTo && input.requestedTo < input.requestedFrom) errors.requestedTo = 'La fecha de fin debe ser posterior a la de inicio.'
   return errors
 }

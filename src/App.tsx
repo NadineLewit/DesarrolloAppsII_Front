@@ -212,7 +212,7 @@ function App() {
     try {
       setProjects({
         status: 'success',
-        data: await obrasApi.listProjects({ page: 0, size: LIST_PAGE_SIZE, sort: 'id,asc' }),
+        data: await obrasApi.listProjects({ page: 0, size: LIST_PAGE_SIZE, sort: 'id,desc' }),
       })
     } catch (error) {
       setProjects({ status: 'error', message: getErrorMessage(error) })
@@ -299,7 +299,10 @@ function App() {
   }, [accessToken, loadMessagingSummary])
 
   useEffect(() => {
-    const onUnauthorized = () => {
+    const onUnauthorized = (event: Event) => {
+      const failedToken = (event as CustomEvent<{ accessToken?: string | null }>).detail?.accessToken
+      const currentToken = window.sessionStorage.getItem('obras-publicas-access-token')
+      if (failedToken && currentToken && failedToken !== currentToken) return
       window.sessionStorage.removeItem('obras-publicas-session')
       window.sessionStorage.removeItem('obras-publicas-access-token')
       setSession(null)
@@ -342,6 +345,7 @@ function App() {
   }
 
   function openCreateProjectForm() {
+    setFeedback(null)
     setEditingProjectId(null)
     setProjectForm(emptyProjectForm())
     setProjectErrors({})
@@ -349,6 +353,7 @@ function App() {
   }
 
   function openEditProjectForm(project: ProyectoObra) {
+    setFeedback(null)
     setEditingProjectId(project.id)
     setProjectForm(projectToForm(project))
     setProjectErrors({})
@@ -381,6 +386,7 @@ function App() {
   }
 
   function openCreateOrderForm() {
+    setFeedback(null)
     setEditingOrderId(null)
     setOrderForm(emptyOrderForm())
     setOrderErrors({})
@@ -388,6 +394,7 @@ function App() {
   }
 
   function openEditOrderForm(order: OrdenTrabajo) {
+    setFeedback(null)
     setEditingOrderId(order.id)
     setOrderForm(orderToForm(order))
     setOrderErrors({})
@@ -494,6 +501,7 @@ function App() {
     window.sessionStorage.setItem('obras-publicas-access-token', nextSession.accessToken)
     setProjectDetail(null)
     setOrderDetail(null)
+    setFeedback(null)
     setSession(nextSession)
   }
 
@@ -511,6 +519,7 @@ function App() {
     setProjectDetail(null)
     setOrderDetail(null)
     setOrderAction(null)
+    setFeedback(null)
     setSession(null)
   }
 
@@ -547,7 +556,10 @@ function App() {
                 key={item.id}
                 className={seccionActiva === item.id ? 'active' : ''}
                 type="button"
-                onClick={() => setSeccionActiva(item.id as Seccion)}
+                onClick={() => {
+                  setFeedback(null)
+                  setSeccionActiva(item.id as Seccion)
+                }}
               >
                 <Icon size={18} aria-hidden="true" />
                 {item.label}
@@ -658,6 +670,7 @@ function App() {
                   setProjectFormMode('closed')
                   setEditingProjectId(null)
                   setProjectErrors({})
+                  setFeedback(null)
                 }}
                 onChange={(field, value) => setProjectForm((current) => ({ ...current, [field]: value }))}
                 onSubmit={handleProjectSubmit}
@@ -731,7 +744,10 @@ function App() {
               <ProjectApprovalForm
                 disabled={busy}
                 project={approvalProject}
-                onCancel={() => setApprovalProject(null)}
+                onCancel={() => {
+                  setApprovalProject(null)
+                  setFeedback(null)
+                }}
                 onSubmit={(payload) => void handleApproveProject(approvalProject, payload)}
               />
             )}
@@ -739,7 +755,10 @@ function App() {
               <ProjectRejectionForm
                 disabled={busy}
                 project={rejectionProject}
-                onCancel={() => setRejectionProject(null)}
+                onCancel={() => {
+                  setRejectionProject(null)
+                  setFeedback(null)
+                }}
                 onSubmit={(payload) => void handleRejectProject(rejectionProject, payload)}
               />
             )}
@@ -770,6 +789,7 @@ function App() {
                   setOrderFormMode('closed')
                   setEditingOrderId(null)
                   setOrderErrors({})
+                  setFeedback(null)
                 }}
                 onChange={(field, value) => setOrderForm((current) => ({ ...current, [field]: value }))}
                 onSubmit={handleOrderSubmit}
@@ -920,7 +940,10 @@ function App() {
                 action={orderAction}
                 crewNames={crewNames}
                 disabled={busy}
-                onCancel={() => setOrderAction(null)}
+                onCancel={() => {
+                  setOrderAction(null)
+                  setFeedback(null)
+                }}
                 onSubmit={(request) => void handleOrderAction(request)}
               />
             )}
@@ -971,6 +994,7 @@ function App() {
                 onCancel={() => {
                   setClosureFormOpen(false)
                   setClosureErrors({})
+                  setFeedback(null)
                 }}
                 onChange={(field, value) => setClosureForm((current) => ({ ...current, [field]: value }))}
                 onSubmit={handleClosureSubmit}
