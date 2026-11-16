@@ -350,6 +350,42 @@ describe('App: recorridos de usuario', () => {
     await waitFor(() => expect(obrasApi.listWorkOrders).toHaveBeenLastCalledWith(expect.objectContaining({ search: 'vereda', page: 1 })))
   })
 
+  it('conserva los filtros de órdenes después de una recarga', async () => {
+    const user = userEvent.setup()
+    mockSession()
+    vi.mocked(obrasApi.listWorkOrders).mockResolvedValue(page([order], 3))
+    const firstRender = render(<App />)
+
+    await user.click(screen.getByRole('button', { name: 'Ordenes' }))
+    await user.type(screen.getByPlaceholderText('Buscar por ubicacion, tipo, origen o sourceRequestId'), 'vereda')
+    await user.selectOptions(screen.getByLabelText('Filtrar órdenes por estado'), 'PROGRAMADA')
+    await user.selectOptions(screen.getByLabelText('Filtrar órdenes por origen'), 'PROYECTO')
+
+    await waitFor(() => expect(obrasApi.listWorkOrders).toHaveBeenLastCalledWith(expect.objectContaining({
+      search: 'vereda',
+      status: 'PROGRAMADA',
+      origin: 'PROYECTO',
+      page: 0,
+    })))
+
+    firstRender.unmount()
+    vi.clearAllMocks()
+    mockData()
+    vi.mocked(obrasApi.me).mockResolvedValue({ username: 'tester', role: 'PERSONAL_OBRAS' })
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: 'Ordenes' }))
+    expect((screen.getByPlaceholderText('Buscar por ubicacion, tipo, origen o sourceRequestId') as HTMLInputElement).value).toBe('vereda')
+    expect((screen.getByLabelText('Filtrar órdenes por estado') as HTMLSelectElement).value).toBe('PROGRAMADA')
+    expect((screen.getByLabelText('Filtrar órdenes por origen') as HTMLSelectElement).value).toBe('PROYECTO')
+    await waitFor(() => expect(obrasApi.listWorkOrders).toHaveBeenCalledWith(expect.objectContaining({
+      search: 'vereda',
+      status: 'PROGRAMADA',
+      origin: 'PROYECTO',
+      page: 0,
+    })))
+  })
+
   it('muestra fallo de carga y reintenta sin reiniciar la aplicación', async () => {
     const user = userEvent.setup()
     mockSession()

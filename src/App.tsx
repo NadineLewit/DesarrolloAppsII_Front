@@ -51,6 +51,13 @@ import './App.css'
 
 const ORDER_PAGE_SIZE = 5
 const LIST_PAGE_SIZE = 20
+const ORDER_FILTERS_STORAGE_KEY = 'obras-publicas-order-filters'
+
+type PersistedOrderFilters = {
+  search: string
+  status: 'TODOS' | WorkOrderStatus
+  origin: 'TODOS' | WorkOrderOrigin
+}
 
 type RemoteState<T> = {
   status: 'loading' | 'success' | 'error'
@@ -116,9 +123,10 @@ type OrderActionRequest =
 function App() {
   const [seccionActiva, setSeccionActiva] = useState<Seccion>('dashboard')
   const [session, setSession] = useState<AuthSession | null>(() => restoreSession())
-  const [busqueda, setBusqueda] = useState('')
-  const [estadoOrden, setEstadoOrden] = useState<'TODOS' | WorkOrderStatus>('TODOS')
-  const [origenOrden, setOrigenOrden] = useState<'TODOS' | WorkOrderOrigin>('TODOS')
+  const [initialOrderFilters] = useState(() => restoreOrderFilters())
+  const [busqueda, setBusqueda] = useState(initialOrderFilters.search)
+  const [estadoOrden, setEstadoOrden] = useState<'TODOS' | WorkOrderStatus>(initialOrderFilters.status)
+  const [origenOrden, setOrigenOrden] = useState<'TODOS' | WorkOrderOrigin>(initialOrderFilters.origin)
   const [pagina, setPagina] = useState(1)
   const [dashboard, setDashboard] = useState<RemoteState<DashboardSummary>>({ status: 'loading' })
   const [projects, setProjects] = useState<RemoteState<PageResponse<ProyectoObra>>>({ status: 'loading' })
@@ -292,6 +300,10 @@ function App() {
     if (!accessToken) return
     void loadOrders()
   }, [accessToken, loadOrders])
+
+  useEffect(() => {
+    persistOrderFilters({ search: busqueda, status: estadoOrden, origin: origenOrden })
+  }, [busqueda, estadoOrden, origenOrden])
 
   useEffect(() => {
     if (!accessToken) return
@@ -810,6 +822,7 @@ function App() {
                 />
               </label>
               <select
+                aria-label="Filtrar órdenes por estado"
                 value={estadoOrden}
                 onChange={(event) => {
                   setEstadoOrden(event.target.value as 'TODOS' | WorkOrderStatus)
@@ -822,6 +835,7 @@ function App() {
                 ))}
               </select>
               <select
+                aria-label="Filtrar órdenes por origen"
                 value={origenOrden}
                 onChange={(event) => {
                   setOrigenOrden(event.target.value as 'TODOS' | WorkOrderOrigin)
@@ -1934,6 +1948,40 @@ function getErrorMessage(error: unknown) {
   }
 
   return 'Ocurrio un error inesperado.'
+}
+
+function restoreOrderFilters(): PersistedOrderFilters {
+  const defaults: PersistedOrderFilters = { search: '', status: 'TODOS', origin: 'TODOS' }
+
+  try {
+    const raw = window.sessionStorage.getItem(ORDER_FILTERS_STORAGE_KEY)
+    if (!raw) return defaults
+
+    const stored = JSON.parse(raw) as Partial<PersistedOrderFilters>
+    const status = stored.status === 'TODOS' || workOrderStatusOptions.includes(stored.status as WorkOrderStatus)
+      ? stored.status
+      : 'TODOS'
+    const origin = stored.origin === 'TODOS'
+      || (typeof stored.origin === 'string' && Object.prototype.hasOwnProperty.call(originLabels, stored.origin))
+      ? stored.origin
+      : 'TODOS'
+
+    return {
+      search: typeof stored.search === 'string' ? stored.search : '',
+      status: status as PersistedOrderFilters['status'],
+      origin: origin as PersistedOrderFilters['origin'],
+    }
+  } catch {
+    return defaults
+  }
+}
+
+function persistOrderFilters(filters: PersistedOrderFilters) {
+  try {
+    window.sessionStorage.setItem(ORDER_FILTERS_STORAGE_KEY, JSON.stringify(filters))
+  } catch {
+    // La navegación sigue funcionando aunque el navegador bloquee el storage.
+  }
 }
 
 function restoreSession(): AuthSession | null {
