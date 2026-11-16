@@ -6,6 +6,7 @@ export type ProjectInput = {
   estimatedStartDate: string
   estimatedDurationDays: string
   technicalManager: string
+  description?: string
 }
 
 export type WorkOrderInput = {
@@ -54,6 +55,7 @@ export function validateProject(input: ProjectInput): FormErrors {
 
   if (input.estimatedBudget && Number(input.estimatedBudget) <= 0) errors.estimatedBudget = 'El presupuesto debe ser mayor a 0.'
   if (input.estimatedDurationDays && Number(input.estimatedDurationDays) <= 0) errors.estimatedDurationDays = 'La duración debe ser mayor a 0.'
+  if ((input.description?.length ?? 0) > 1000) errors.description = 'La descripción no puede superar 1000 caracteres.'
   return errors
 }
 

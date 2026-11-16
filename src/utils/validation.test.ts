@@ -8,6 +8,15 @@ describe('validaciones de formularios', () => {
     })
   })
 
+  it('rechaza descripciones de proyecto con más de 1000 caracteres', () => {
+    const errors = validateProject({
+      name: 'Proyecto', scope: 'Alcance', location: 'Centro', estimatedBudget: '1',
+      estimatedStartDate: '2026-11-19', estimatedDurationDays: '10', technicalManager: 'Responsable',
+      description: 'x'.repeat(1001),
+    })
+    expect(errors.description).toBe('La descripción no puede superar 1000 caracteres.')
+  })
+
   it('exige cuadrilla y correlación para una orden externa', () => {
     const errors = validateWorkOrder({ origin: 'ATENCION_CIUDADANA', projectId: '', sourceRequestId: '', description: 'Bache', interventionType: 'Reparación', location: 'Lima 100', estimatedDurationHours: '2', crew: '' })
     expect(errors).toMatchObject({ sourceRequestId: expect.any(String), crew: expect.any(String) })
