@@ -45,6 +45,15 @@ describe('obrasApi: contrato HTTP del frontend', () => {
     expect(fetchMock.mock.calls[1][0]).toBe('http://localhost:5173/api/public-works/projects?status=APROBADO&page=0')
   })
 
+  it('envía el motivo obligatorio al rechazar un proyecto', async () => {
+    await obrasApi.rejectProject(7, { observations: 'Documentación incompleta' })
+
+    const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('http://localhost:5173/api/public-works/projects/7/reject')
+    expect(options.method).toBe('PATCH')
+    expect(JSON.parse(String(options.body))).toEqual({ observations: 'Documentación incompleta' })
+  })
+
   it('acepta respuestas 204 y rechaza HTML inesperado del proxy', async () => {
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }))
     await expect(obrasApi.logout()).resolves.toBeUndefined()
@@ -79,7 +88,7 @@ describe('obrasApi: contrato HTTP del frontend', () => {
     ['editar proyecto', () => obrasApi.updateProject(7, { name: 'QA', estimatedBudget: 1, estimatedStartDate: '2026-09-22', estimatedDurationDays: 1 }), '/public-works/projects/7', 'PUT'],
     ['presentar proyecto', () => obrasApi.submitProjectForApproval(7), '/public-works/projects/7/submit-approval', 'PATCH'],
     ['aprobar proyecto', () => obrasApi.approveProject(7, { approvedBudget: 1, approvedDeadlineDays: 1, approvedAt: '2026-09-22' }), '/public-works/projects/7/approve', 'PATCH'],
-    ['rechazar proyecto', () => obrasApi.rejectProject(7), '/public-works/projects/7/reject', 'PATCH'],
+    ['rechazar proyecto', () => obrasApi.rejectProject(7, { observations: 'Documentación incompleta' }), '/public-works/projects/7/reject', 'PATCH'],
     ['orden', () => obrasApi.getWorkOrder(4), '/public-works/work-orders/4', 'GET'],
     ['crear orden', () => obrasApi.createWorkOrder({ origin: 'MANUAL', description: 'QA', priority: 'MEDIA' }), '/public-works/work-orders', 'POST'],
     ['editar orden', () => obrasApi.updateWorkOrder(4, { origin: 'MANUAL', description: 'QA', priority: 'MEDIA' }), '/public-works/work-orders/4', 'PUT'],

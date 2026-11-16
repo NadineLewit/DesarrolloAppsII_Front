@@ -14,6 +14,7 @@ import type {
   ProyectoObra,
   ProyectoObraPayload,
   ProjectApprovalPayload,
+  ProjectRejectionPayload,
   Rol,
   ResourcesSummary,
   ScheduleOTPayload,
@@ -190,8 +191,8 @@ export const obrasApi = {
   approveProject(id: number, body: ProjectApprovalPayload) {
     return request<ProyectoObra>(`/public-works/projects/${id}/approve`, { method: 'PATCH', body })
   },
-  rejectProject(id: number) {
-    return request<ProyectoObra>(`/public-works/projects/${id}/reject`, { method: 'PATCH' })
+  rejectProject(id: number, body: ProjectRejectionPayload) {
+    return request<ProyectoObra>(`/public-works/projects/${id}/reject`, { method: 'PATCH', body })
   },
   listWorkOrders(params: ListWorkOrdersParams = {}) {
     return request<PageResponse<OrdenTrabajo>>('/public-works/work-orders', { params })
@@ -214,7 +215,7 @@ export const obrasApi = {
   pauseWorkOrder(id: number) {
     return request<OrdenTrabajo>(`/public-works/work-orders/${id}/pause`, { method: 'PATCH' })
   },
-  completeWorkOrder(id: number, body: CompleteOTPayload = {}) {
+  completeWorkOrder(id: number, body: CompleteOTPayload) {
     return request<OrdenTrabajo>(`/public-works/work-orders/${id}/complete`, { method: 'PATCH', body })
   },
   validateWorkOrder(id: number, body: ValidateOTPayload) {
