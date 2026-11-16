@@ -21,7 +21,7 @@ import {
   Users,
 } from 'lucide-react'
 import type { FormEvent } from 'react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ApiError, obrasApi } from './api/obrasApi'
 import { env } from './config/env'
 import { useIntegrationEvents } from './hooks/useIntegrationEvents'
@@ -139,6 +139,7 @@ function App() {
   const loadIntegrationEvents = integrationEvents.refresh
   const [messagingSummary, setMessagingSummary] = useState<RemoteState<MessagingSummary>>({ status: 'loading' })
   const [projectDetail, setProjectDetail] = useState<RemoteState<ProyectoObra> | null>(null)
+  const projectDetailRef = useRef<HTMLDivElement | null>(null)
   const [orderDetail, setOrderDetail] = useState<RemoteState<OrdenTrabajo> | null>(null)
   const [feedback, setFeedback] = useState<Feedback | null>(null)
   const [actionPending, setActionPending] = useState<string | null>(null)
@@ -205,6 +206,15 @@ function App() {
       .filter((closure) => !isClosureAuthorized(closure.status))
       .map((closure) => closure.workOrderId),
   ), [closures.data?.content])
+
+  useEffect(() => {
+    if (!projectDetail || !projectDetailRef.current) {
+      return
+    }
+
+    projectDetailRef.current.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+    projectDetailRef.current.focus({ preventScroll: true })
+  }, [projectDetail])
 
   const loadDashboard = useCallback(async () => {
     setDashboard({ status: 'loading' })
@@ -751,7 +761,11 @@ function App() {
               </div>
             )}
 
-            {projectDetail && <ProjectDetail state={projectDetail} />}
+            {projectDetail && (
+              <div ref={projectDetailRef} tabIndex={-1} aria-live="polite">
+                <ProjectDetail state={projectDetail} />
+              </div>
+            )}
             {approvalProject && (
               <ProjectApprovalForm
                 disabled={busy}
