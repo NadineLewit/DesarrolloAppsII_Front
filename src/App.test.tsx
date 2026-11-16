@@ -90,6 +90,19 @@ describe('App: recorridos de usuario', () => {
     expect(window.sessionStorage.getItem('obras-publicas-session')).toBeNull()
   })
 
+  it('ignora un 401 tardío de un token anterior después de volver a iniciar sesión', async () => {
+    mockSession()
+    render(<App />)
+    expect(await screen.findByText('Tablero operativo')).toBeTruthy()
+
+    window.dispatchEvent(new CustomEvent('obras-api-unauthorized', { detail: { accessToken: 'token-anterior' } }))
+    expect(screen.getByText('Tablero operativo')).toBeTruthy()
+    expect(window.sessionStorage.getItem('obras-publicas-access-token')).toBe('qa-token')
+
+    window.dispatchEvent(new CustomEvent('obras-api-unauthorized', { detail: { accessToken: 'qa-token' } }))
+    expect(await screen.findByRole('button', { name: 'Ingresar' })).toBeTruthy()
+  })
+
   it('carga datos reales simulados, navega por secciones y cierra la sesión', async () => {
     const user = userEvent.setup()
     mockSession()
@@ -153,6 +166,7 @@ describe('App: recorridos de usuario', () => {
     mockSession('PERSONAL_OBRAS')
     render(<App />)
     await user.click(screen.getByRole('button', { name: 'Proyectos' }))
+    await waitFor(() => expect(obrasApi.listProjects).toHaveBeenCalledWith({ page: 0, size: 20, sort: 'id,desc' }))
     expect(screen.getByRole('button', { name: 'Crear' }).hasAttribute('disabled')).toBe(false)
   })
 
@@ -180,19 +194,25 @@ describe('App: recorridos de usuario', () => {
     await user.click(within(form).getByRole('button', { name: 'Crear proyecto' }))
     expect(obrasApi.createProject).not.toHaveBeenCalled()
     expect(screen.getByText('Revisá los campos obligatorios del proyecto.')).toBeTruthy()
+    await user.click(within(form).getByRole('button', { name: 'Cancelar' }))
+    expect(screen.queryByText('Revisá los campos obligatorios del proyecto.')).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Crear' }))
+    const reopenedForm = screen.getByRole('heading', { name: 'Crear proyecto' }).closest('form')!
 
-    await user.type(within(form).getByLabelText(/^Nombre/), '  Plaza Norte  ')
-    await user.type(within(form).getByLabelText(/^Ubicacion/), 'Centro')
-    await user.type(within(form).getByLabelText(/^Presupuesto estimado/), '120000')
-    await user.type(within(form).getByLabelText(/^Fecha estimada/), '2026-10-01')
-    await user.type(within(form).getByLabelText(/^Duracion dias/), '30')
-    await user.type(within(form).getByLabelText(/^Responsable tecnico/), 'Ana')
-    await user.type(within(form).getByLabelText(/^Alcance/), 'Veredas')
-    await user.click(within(form).getByRole('button', { name: 'Crear proyecto' }))
+    await user.type(within(reopenedForm).getByLabelText(/^Nombre/), '  Plaza Norte  ')
+    await user.type(within(reopenedForm).getByLabelText(/^Ubicacion/), 'Centro')
+    await user.type(within(reopenedForm).getByLabelText(/^Presupuesto estimado/), '120000')
+    await user.type(within(reopenedForm).getByLabelText(/^Fecha estimada/), '2026-10-01')
+    await user.type(within(reopenedForm).getByLabelText(/^Duracion dias/), '30')
+    await user.type(within(reopenedForm).getByLabelText(/^Responsable tecnico/), 'Ana')
+    await user.type(within(reopenedForm).getByLabelText(/^Alcance/), 'Veredas')
+    await user.click(within(reopenedForm).getByRole('button', { name: 'Crear proyecto' }))
     await waitFor(() => expect(obrasApi.createProject).toHaveBeenCalledWith(expect.objectContaining({
       name: 'Plaza Norte', location: 'Centro', estimatedBudget: 120000, estimatedDurationDays: 30, scope: 'Veredas',
     })))
     expect(await screen.findByText('Proyecto creado.')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Recursos' }))
+    expect(screen.queryByText('Proyecto creado.')).toBeNull()
   })
 
   it('edita un proyecto y envía el borrador a aprobación', async () => {
@@ -241,7 +261,7 @@ describe('App: recorridos de usuario', () => {
     vi.mocked(obrasApi.createStreetClosure).mockResolvedValue({
       id: 1, closureRequestId: 'QA-1', sourceModule: 'M3', workOrderId: 12,
       location: 'Centro', affectedSections: ['Lima 100', 'Lima 200'], status: 'PENDIENTE',
-      requestedFrom: '2026-10-01', requestedTo: '2026-10-02', reason: 'Bacheo',
+      requestedFrom: '2099-10-01', requestedTo: '2099-10-02', reason: 'Bacheo',
     })
     render(<App />)
     await user.click(screen.getByRole('button', { name: 'Cortes' }))
@@ -251,14 +271,14 @@ describe('App: recorridos de usuario', () => {
     expect(obrasApi.createStreetClosure).not.toHaveBeenCalled()
     await user.type(within(form).getByLabelText(/^ID de orden/), '12')
     await user.type(within(form).getByLabelText(/^Dirección completa/), 'Centro')
-    await user.type(within(form).getByLabelText(/^Desde/), '2026-10-01')
-    await user.type(within(form).getByLabelText(/^Hasta/), '2026-10-02')
+    await user.type(within(form).getByLabelText(/^Desde/), '2099-10-01')
+    await user.type(within(form).getByLabelText(/^Hasta/), '2099-10-02')
     await user.type(within(form).getByLabelText(/^Tramos afectados/), 'Lima 100, Lima 200')
     await user.type(within(form).getByLabelText(/^Motivo/), 'Bacheo')
     await user.click(within(form).getByRole('button', { name: 'Crear solicitud' }))
     await waitFor(() => expect(obrasApi.createStreetClosure).toHaveBeenCalledWith({
       workOrderId: 12, location: 'Centro', affectedSections: ['Lima 100', 'Lima 200'],
-      requestedFrom: '2026-10-01', requestedTo: '2026-10-02', reason: 'Bacheo',
+      requestedFrom: '2099-10-01', requestedTo: '2099-10-02', reason: 'Bacheo',
     }))
   })
 
