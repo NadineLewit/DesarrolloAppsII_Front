@@ -35,6 +35,7 @@ import type {
   ProyectoObra,
   ProyectoObraPayload,
   ProjectApprovalPayload,
+  ProjectRejectionPayload,
   ResourcesSummary,
   Rol,
   Seccion,
@@ -143,6 +144,7 @@ function App() {
   const [closureForm, setClosureForm] = useState<ClosureFormState>(emptyClosureForm)
   const [closureErrors, setClosureErrors] = useState<FormErrors>({})
   const [approvalProject, setApprovalProject] = useState<ProyectoObra | null>(null)
+  const [rejectionProject, setRejectionProject] = useState<ProyectoObra | null>(null)
   const [orderAction, setOrderAction] = useState<{ kind: OrderActionKind; order: OrdenTrabajo } | null>(null)
 
   const rol = session?.role ?? 'PERSONAL_OBRAS'
@@ -464,6 +466,13 @@ function App() {
     }
   }
 
+  async function handleRejectProject(project: ProyectoObra, payload: ProjectRejectionPayload) {
+    const succeeded = await runAction(`reject-project-${project.id}`, 'Proyecto rechazado.', () => obrasApi.rejectProject(project.id, payload))
+    if (succeeded) {
+      setRejectionProject(null)
+    }
+  }
+
   function handleLogin(nextSession: AuthSession) {
     window.sessionStorage.setItem('obras-publicas-session', JSON.stringify(nextSession))
     window.sessionStorage.setItem('obras-publicas-access-token', nextSession.accessToken)
@@ -691,9 +700,7 @@ function App() {
                       <button
                         type="button"
                         disabled={project.status !== 'PENDIENTE_APROBACION' || !permisos.includes('rechazarProyecto') || busy}
-                        onClick={() => void runAction(`reject-project-${project.id}`, 'Proyecto rechazado.', () =>
-                          obrasApi.rejectProject(project.id),
-                        )}
+                        onClick={() => setRejectionProject(project)}
                       >
                         Rechazar
                       </button>
@@ -710,6 +717,14 @@ function App() {
                 project={approvalProject}
                 onCancel={() => setApprovalProject(null)}
                 onSubmit={(payload) => void handleApproveProject(approvalProject, payload)}
+              />
+            )}
+            {rejectionProject && (
+              <ProjectRejectionForm
+                disabled={busy}
+                project={rejectionProject}
+                onCancel={() => setRejectionProject(null)}
+                onSubmit={(payload) => void handleRejectProject(rejectionProject, payload)}
               />
             )}
           </section>
@@ -1266,6 +1281,51 @@ function ProjectApprovalForm({
   )
 }
 
+function ProjectRejectionForm({
+  disabled,
+  project,
+  onCancel,
+  onSubmit,
+}: {
+  disabled: boolean
+  project: ProyectoObra
+  onCancel: () => void
+  onSubmit: (payload: ProjectRejectionPayload) => void
+}) {
+  const [observations, setObservations] = useState('')
+  const [error, setError] = useState('')
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const reason = observations.trim()
+    if (!reason) {
+      setError('El motivo del rechazo es obligatorio.')
+      return
+    }
+    onSubmit({ observations: reason })
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <form className="approval-modal" aria-modal="true" noValidate onSubmit={submit} role="dialog" aria-labelledby="rejection-title">
+        <div className="form-heading">
+          <div>
+            <h2 id="rejection-title">Rechazar proyecto</h2>
+            <p>{project.name}</p>
+          </div>
+          <button type="button" disabled={disabled} onClick={onCancel}>Cancelar</button>
+        </div>
+        <label>
+          Motivo del rechazo
+          <textarea required maxLength={1000} value={observations} onChange={(event) => setObservations(event.target.value)} />
+        </label>
+        {error && <p className="field-error" role="alert">{error}</p>}
+        <button type="submit" disabled={disabled}>{disabled ? 'Rechazando...' : 'Confirmar rechazo'}</button>
+      </form>
+    </div>
+  )
+}
+
 function MetricCard({ icon: Icon, label, value, trend }: { icon: typeof BarChart3; label: string; value: string; trend: string }) {
   return (
     <article className="metric-card">
@@ -1426,12 +1486,12 @@ function ProjectForm({
       <div className="form-grid">
         <label>
           Nombre
-          <input aria-invalid={Boolean(errors.name)} required value={value.name} onChange={(event) => onChange('name', event.target.value)} />
+          <input aria-invalid={Boolean(errors.name)} maxLength={200} required value={value.name} onChange={(event) => onChange('name', event.target.value)} />
           {errors.name && <small className="field-error">{errors.name}</small>}
         </label>
         <label>
           Ubicacion
-          <input aria-invalid={Boolean(errors.location)} required value={value.location} onChange={(event) => onChange('location', event.target.value)} />
+          <input aria-invalid={Boolean(errors.location)} maxLength={300} required value={value.location} onChange={(event) => onChange('location', event.target.value)} />
           {errors.location && <small className="field-error">{errors.location}</small>}
         </label>
         <label>
@@ -1451,7 +1511,7 @@ function ProjectForm({
         </label>
         <label>
           Responsable tecnico
-          <input aria-invalid={Boolean(errors.technicalManager)} required value={value.technicalManager} onChange={(event) => onChange('technicalManager', event.target.value)} />
+          <input aria-invalid={Boolean(errors.technicalManager)} maxLength={200} required value={value.technicalManager} onChange={(event) => onChange('technicalManager', event.target.value)} />
           {errors.technicalManager && <small className="field-error">{errors.technicalManager}</small>}
         </label>
         <label>
@@ -1464,16 +1524,16 @@ function ProjectForm({
         </label>
         <label>
           Contratista
-          <input value={value.contractor} onChange={(event) => onChange('contractor', event.target.value)} />
+          <input maxLength={200} value={value.contractor} onChange={(event) => onChange('contractor', event.target.value)} />
         </label>
         <label className="wide-field">
           Alcance
-          <textarea aria-invalid={Boolean(errors.scope)} required value={value.scope} onChange={(event) => onChange('scope', event.target.value)} />
+          <textarea aria-invalid={Boolean(errors.scope)} maxLength={1000} required value={value.scope} onChange={(event) => onChange('scope', event.target.value)} />
           {errors.scope && <small className="field-error">{errors.scope}</small>}
         </label>
         <label className="wide-field">
           Descripcion
-          <textarea value={value.description} onChange={(event) => onChange('description', event.target.value)} />
+          <textarea maxLength={1000} value={value.description} onChange={(event) => onChange('description', event.target.value)} />
         </label>
       </div>
       <button type="submit" disabled={disabled}>{mode === 'edit' ? 'Guardar cambios' : 'Crear proyecto'}</button>

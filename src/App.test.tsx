@@ -392,7 +392,13 @@ describe('App: recorridos de usuario', () => {
     await user.click(screen.getByRole('button', { name: 'Proyectos' }))
     const row = (await screen.findByText('Bacheo Centro')).closest('article')!
     await user.click(within(row).getByRole('button', { name: 'Rechazar' }))
-    await waitFor(() => expect(obrasApi.rejectProject).toHaveBeenCalledWith(7))
+    const dialog = screen.getByRole('dialog', { name: 'Rechazar proyecto' })
+    await user.click(within(dialog).getByRole('button', { name: 'Confirmar rechazo' }))
+    expect(obrasApi.rejectProject).not.toHaveBeenCalled()
+    expect(within(dialog).getByRole('alert').textContent).toContain('obligatorio')
+    await user.type(within(dialog).getByLabelText('Motivo del rechazo'), 'Documentación incompleta')
+    await user.click(within(dialog).getByRole('button', { name: 'Confirmar rechazo' }))
+    await waitFor(() => expect(obrasApi.rejectProject).toHaveBeenCalledWith(7, { observations: 'Documentación incompleta' }))
     expect(await screen.findByText('Proyecto rechazado.')).toBeTruthy()
   })
 

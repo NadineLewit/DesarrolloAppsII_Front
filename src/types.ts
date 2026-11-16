@@ -67,6 +67,8 @@ export type ProyectoObra = {
 
 export type ProjectApprovalPayload = { approvedBudget: number; approvedDeadlineDays: number; approvedAt: string; observations?: string }
 
+export type ProjectRejectionPayload = { observations: string }
+
 export type LoginResponse = {
   accessToken: string
   username: string
@@ -125,7 +127,7 @@ export type ScheduleOTPayload = {
 }
 
 export type CompleteOTPayload = {
-  outcome?: string
+  outcome: string
 }
 
 export type ValidateOTPayload = {
