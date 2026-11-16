@@ -53,6 +53,10 @@ describe('App: recorridos de usuario', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     window.sessionStorage.clear()
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: vi.fn(),
+    })
     mockData()
   })
 
@@ -168,6 +172,22 @@ describe('App: recorridos de usuario', () => {
     await user.click(screen.getByRole('button', { name: 'Proyectos' }))
     await waitFor(() => expect(obrasApi.listProjects).toHaveBeenCalledWith({ page: 0, size: 20, sort: 'id,desc' }))
     expect(screen.getByRole('button', { name: 'Crear' }).hasAttribute('disabled')).toBe(false)
+  })
+
+  it('muestra y enfoca el detalle del proyecto al seleccionarlo', async () => {
+    const user = userEvent.setup()
+    mockSession('PERSONAL_OBRAS')
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: 'Proyectos' }))
+    const row = (await screen.findByText('Bacheo Centro')).closest('article')
+    expect(row).not.toBeNull()
+    await user.click(within(row!).getByRole('button', { name: 'Detalle' }))
+
+    const heading = await screen.findByRole('heading', { name: 'Detalle de proyecto #7' })
+    expect(obrasApi.getProject).toHaveBeenCalledWith(7)
+    expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalled()
+    expect(heading.parentElement?.parentElement).toBe(document.activeElement)
   })
 
   it('abre detalle y no permite iniciar una orden sin cuadrilla', async () => {
